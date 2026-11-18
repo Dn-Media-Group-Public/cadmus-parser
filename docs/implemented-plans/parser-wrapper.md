@@ -3,7 +3,7 @@
 See also [Plan: file metadata](file-metadata.md) (its child-process isolation is superseded by this plan),
 [Jobs, storage and links](../architecture/jobs-and-storage.md), [Session isolation](../architecture/session-isolation.md) (the uid lifecycle and the
 `browser_clear` egress rules this plan copies), [Backend plugins](../architecture/backend-plugins.md) (overlay contract),
-[Plan: OCR hybrid](../plans/ocr-hybrid.md) (its remote step moves to the OCR sidecar below).
+[Plan: OCR hybrid](ocr-hybrid.md) (its remote step moves to the OCR sidecar below).
 **Depends on [Plan: project access model](project-access-model.md)**: the key layout (`projects/<proj>/data/<session>/<job>/…`), the three-part job
 reference, the shared bucket and the per-job scoped credentials are defined there; this plan only uses them.
 
@@ -120,7 +120,7 @@ replacing the `OCR_BASE_URL_<BACKEND>` variables of the OCR plan).
 
 ### Remote OCR (sidecar)
 
-The remote step of [Plan: OCR hybrid](../plans/ocr-hybrid.md) cannot run in the parser (no egress, no credentials), so it is a separate container. Tesseract and
+The remote step of [Plan: OCR hybrid](ocr-hybrid.md) cannot run in the parser (no egress, no credentials), so it is a separate container. Tesseract and
 rasterising/downscaling stay in the parser (`ocr.py` moves into `parser/`).
 
 - **`ocr-sidecar`**: a stateless forwarder. `POST` with the image bytes (PNG/JPEG, already downscaled by the parser to `OCR_MAX_SIDE`) and
@@ -255,7 +255,7 @@ authenticated by token. One parser per job, forked by the wrapper, no warm pool 
 6. ~~**Cleanup of partial jobs.**~~ **Decided: nothing in this plan.** A failed job keeps its uploaded artefacts, its `index.json` (with the failure noted) and
    `failed` status; partial results stay readable and a retry overwrites the same keys. Removing old data is a general retention question for the whole
    `data/` tree (for example a bucket lifecycle rule), outside this plan.
-7. ~~**OCR cold start**~~ ([OCR hybrid](../plans/ocr-hybrid.md), open question 2) **Decided:** the OCR plan's default stands. A self-hosted model may take minutes
+7. ~~**OCR cold start**~~ ([OCR hybrid](ocr-hybrid.md), open question 2) **Decided:** the OCR plan's default stands. A self-hosted model may take minutes
    to start; the first call after idle times out (`OCR_TIMEOUT`), the Tesseract text is kept and the note says the remote step failed. No longer
    timeout and no warm-up call; revisit with measured cold-start times.
 8. ~~**`_describe_file`**~~ **Decided: one path.** Today the gateway has two ways from an original to the `original/`, `parsed/`, `terse/`, `metadata/` tree:

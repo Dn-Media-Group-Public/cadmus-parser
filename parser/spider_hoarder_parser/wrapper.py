@@ -38,7 +38,8 @@ TOP_DIRS = {"original", "parsed", "simplified", "terse", "metadata"}  # what a p
 LINE_MAX = 4096  # PIPE_BUF: the parser writes each record with one write
 HEARTBEAT, STALE = 10, 30  # seconds
 # the operator settings the parser process enforces (limits, no secret): the only part of the wrapper's own environment a parser gets
-PARSER_LIMIT_ENV = ("MAX_PARSE_BYTES", "MAX_ARCHIVE_BYTES", "MAX_ARCHIVE_MEMBERS", "METADATA_TIMEOUT", "METADATA_MAX_MEM", "METADATA_MAX_BYTES", "OCR_TIMEOUT")
+PARSER_LIMIT_ENV = ("MAX_PARSE_BYTES", "MAX_ARCHIVE_BYTES", "MAX_ARCHIVE_MEMBERS", "METADATA_TIMEOUT", "METADATA_MAX_MEM", "METADATA_MAX_BYTES", "OCR_TIMEOUT",
+                     "OCR_LANGS", "OCR_MIN_CONF", "OCR_MIN_CHARS", "OCR_DPI", "OCR_MAX_PAGES", "OCR_MAX_SIDE", "OCR_TESSERACT_TIMEOUT")
 
 
 class ProtocolError(Exception):

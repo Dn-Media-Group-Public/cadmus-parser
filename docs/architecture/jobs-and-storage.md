@@ -96,6 +96,16 @@ and the tool signatures are unchanged.
 Egress and the store: the wrapper reaches the store only through the **blob-sidecar** (squid 6, HTTP Basic with the proxy token on every request, 407 without;
 `http` and `https` CONNECT; no destination allowlist) whose own egress rules, a copy of the browser-clear ones (public internet only; `blob-sidecar/egress_rules.py`),
 reject private ranges, link-local/metadata, CGNAT and loopback; `PARSE_PROXY_ALLOW` (dev: `seaweedfs:8333`) is the one exception, for exactly that address and port.
+**OCR** (`parser/spider_hoarder_parser/ocr.py`, called from `parse._convert` for non-HTML files): standalone images (png, jpeg, webp, gif, tiff, bmp) and
+PDFs with pages whose text layer has < `OCR_MIN_CHARS` (20) characters are OCR'd into `parsed/<path>.md`. Tesseract (`OCR_LANGS`, default `nor+eng`) runs
+first; its result is accepted at mean word confidence >= `OCR_MIN_CONF` (70) and >= `OCR_MIN_CHARS` characters, otherwise, **only if the job has a remote OCR
+profile**, the image (downscaled to `OCR_MAX_SIDE` 2000 px) goes to the sidecar and its text replaces Tesseract's. Without a profile Tesseract's text is used
+whatever its confidence. A failed remote step keeps Tesseract's text. A scanned PDF is rebuilt per page from pdfium's text, OCR'd pages marked
+`<!-- page N (ocr) -->` (rasterised at `OCR_DPI` 200, at most `OCR_MAX_PAGES` 50 per file). Provenance is always in the job's `notes`
+(`<path>: ocr tesseract (conf 91)`, `ocr remote`, `ocr tesseract (conf 38), remote failed: TimeoutError`, `page N ocr …`, `ocr stopped at page N`); an image over
+Pillow's pixel limit is noted and not OCR'd. Privacy: images leave the swarm only for a backend whose `<NAME>_PARSE_OCR` names a profile. Tuning variables are
+global, forwarded by the wrapper to the parser (`wrapper.PARSER_LIMIT_ENV`). See also: [Plan: OCR hybrid](../implemented-plans/ocr-hybrid.md)
+
 Remote OCR is the **ocr-sidecar** (stateless forwarder, own pinned egress, optional): see [Plan: parser wrapper](../implemented-plans/parser-wrapper.md).
 See also: [Plan: parser wrapper](../implemented-plans/parser-wrapper.md)
 

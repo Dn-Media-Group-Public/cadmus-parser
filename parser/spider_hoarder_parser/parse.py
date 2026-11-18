@@ -6,7 +6,7 @@ import mimetypes
 import os
 import shutil
 
-from spider_hoarder_parser import extract, metadata
+from spider_hoarder_parser import extract, metadata, ocr
 
 MAX_PARSE_BYTES = int(os.environ.get("MAX_PARSE_BYTES") or 50 * 1024 * 1024)  # stored files have no cap; parsing does
 MAX_ARCHIVE_BYTES = int(os.environ.get("MAX_ARCHIVE_BYTES") or os.environ.get("MAX_ZIP_BYTES") or 4 * 1024**3)  # uncompressed, per archive
@@ -51,6 +51,8 @@ def _convert(sink: Sink, path: str, raw: bytes, ctype: str, base_url: str) -> No
     except Exception as e:  # noqa: BLE001  one unparseable file never fails the job
         sink.note(f"{path} not parsed ({type(e).__name__}: {e})")
         text = ""
+    if not is_html:
+        text = ocr.maybe_ocr(raw, path, ctype, text, sink.note)
     if not text.strip():
         if not is_html and b"\0" not in raw[:1024]:  # ponytail: NUL sniff; text nobody converted is still returned inline from original/
             sink.mark_text(f"original/{path}")

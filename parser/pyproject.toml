@@ -28,6 +28,9 @@ dependencies = [
     "pyogrio",
     "lxml",
     "pypdf",
+    "pytesseract",
+    "pypdfium2",
+    "Pillow",
 ]
 
 [project.optional-dependencies]

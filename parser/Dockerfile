@@ -4,7 +4,7 @@
 FROM debian:bookworm-slim
 ENV PATH=/venv/bin:$PATH
 RUN apt-get update \
- && apt-get install -y --no-install-recommends python3 python3-venv python3-pip ca-certificates tini util-linux unar libimage-exiftool-perl ffmpeg \
+ && apt-get install -y --no-install-recommends python3 python3-venv python3-pip ca-certificates tini util-linux unar libimage-exiftool-perl ffmpeg tesseract-ocr tesseract-ocr-nor tesseract-ocr-eng \
  && rm -rf /var/lib/apt/lists/* \
  && python3 -m venv /venv \
  && groupadd -g 900 wrapper && useradd -u 900 -g 900 --no-create-home --shell /usr/sbin/nologin wrapper \
