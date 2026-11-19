@@ -1,8 +1,8 @@
 # Plan: the parser service as a generic library (git submodule)
 
-> **Status: draft.** Everything under "Design" is a proposal; the items under "Open questions" need a decision before the step that
-> depends on them. It builds on the implemented [Plan: parser wrapper](../implemented-plans/parser-wrapper.md) and moves that code, it does not
-> redesign its security model. [Plan: OCR hybrid](ocr-hybrid.md) is affected (see "OCR").
+> **Status: ready for review.** All ten open questions and the follow-up details are decided (see "Open questions", which now records the
+> decisions). It builds on the implemented [Plan: parser wrapper](../implemented-plans/parser-wrapper.md) and moves that code; the security model
+> changes only as described under "Security changes". [Plan: OCR hybrid](ocr-hybrid.md) is affected (see "OCR").
 
 ## Problem / Goal
 
@@ -37,20 +37,28 @@ A repository `cadmus-parser` (`git@github.com:Dn-Media-Group-Public/cadmus-parse
 | `wrapper` (`wrapper.py`, uid `Pool`, status/heartbeat, upload) | `parser/spider_hoarder_parser/wrapper.py` | generalised as below |
 | worker protocol (`worker.py`: protocol fd dup, `PipeSink`, record format) | `worker.py`, the `Sink` class of `parse.py` | unchanged protocol; the worker imports the **processor** named in the job |
 | `blob-sidecar` (squid, token auth, egress rules) | `blob-sidecar/` | unchanged |
-| `ocr-sidecar` (profile table, token per profile, forwarder) | `ocr-sidecar/` | unchanged |
+| `ocr-sidecar` (profile table, token per profile, forwarder) | `ocr-sidecar/` | stays OCR-specific (it still builds the prompt and talks to the OCR endpoint) but speaks the common sidecar protocol (open question 9) |
 | `egress_rules.py` | the two copies in the sidecars | one copy for both. The browser's own rules in this project's `browser-sdk` stay a separate copy (they may drift on purpose, per the parser-wrapper plan) |
 | `client` (POST, read `status.json`/`index.json` from the output base with backoff and the heartbeat rule, one retry on 503/refused connection) | `sdk/.../gateway/parse_client.py` minus the inline-text logic | the inline-text and terse logic is the consumer's |
 | base image | `parser/Dockerfile` | wrapper, Python, tini, util-linux, fsspec; **no** processor and no format tools |
 | stack file and overlay generator | `docker-compose.parse.yml`, `scripts/spider_hoarder.py parse-overlay` | see "Deployment" |
 | default processor `files` (optional extra) | `parse.py`, `extract.py`, `metadata.py`, `ocr.py` | decided (open question 2): moves, `terse/`/`simplified/` included, groups renamed `Cadmus-*` |
 
-It does **not** contain: scoped credential minting (the consumer mints, the wrapper only receives one per request), authorisation of end users
+**Packages (decided).** One repo, two installable Python packages, each with its own `pyproject.toml`:
+- **`cadmus-parser`** (import `cadmus_parser`): the **client** that consumers use, with the minting helper (see "Security changes" item 4) and
+  its `[mint-s3]` / `[mint-gcs]` extras. It does not depend on the service.
+- **`cadmus-parser-server`** (import `cadmus_parser_server`): the **service side**: the wrapper, the worker, and the `files` processor as an
+  optional extra, plus the S3/GCS storage extras the wrapper needs.
+The two are versioned together by the repo's tags. The packages live in `client/` and `server/` at the repo root (decided), next to `blob-sidecar/`, `ocr-sidecar/` and `docker-compose.parse.yml`. The Docker images keep the
+`cadmus-parser*` prefix.
+
+It does **not** contain: the decision of when and for what to mint a scoped credential (the consumer decides; the library only ships a small minting helper, see "Security changes" item 4; the wrapper only receives one per request), authorisation of end users
 (the consumer authorises; the wrapper authorises only the consumer by its token, as today), or anything that reads the result and turns it into
 tool output.
 
 ### Contract between a consumer and the library
 
-Four surfaces, all documented in the library and versioned together (`GET /version` on the wrapper returns the API version; breaking changes bump
+Four surfaces between a consumer and the library (the sidecar protocol, a fifth, is documented for sidecar authors, see open question 9), all documented in the library and versioned together (`GET /version` on the wrapper returns the API version; breaking changes bump
 the major version and the consumer pins a tag):
 
 1. **Wrapper HTTP API.** `POST /jobs` with the wrapper token and a body
@@ -59,8 +67,8 @@ the major version and the consumer pins a tag):
      base (a prefix, or a single object, which is a one-file tree) into the parser's input directory, preserving relative paths, and uploads what
      the parser writes under the output base. It never interprets the URLs beyond that: no segment checks, no templates, no layout.
    - `input.options` / `output.options` are the credential for that side (the consumer's scoped credential, as an fsspec `storage_options`
-     fragment), merged over `PARSE_BLOB_OPTIONS`, in memory only. Only option names on a per-scheme allow-list are accepted (see "Security
-     changes"). The two sides may be different stores.
+     fragment), merged over `PARSE_BLOB_OPTIONS`, in memory only. They are passed to fsspec as given, with no
+     filtering (see "Security changes"). The two sides may be different stores.
    - `processor` (default `files`) and `options` (an object only the processor interprets); `features` stays `{name: profile}`. There is no
      class or limit field: the wrapper decides the media class itself (see "Limits").
    - Answers 202 / 409 / 503 / 400 as today. The job's identity (for the 409 check and the in-memory state) is its output base URL.
@@ -68,7 +76,8 @@ the major version and the consumer pins a tag):
      under the output base, `index.json` before `status.json`, and writes `running` before it answers 202. The consumer reads them from the store
      with the credential it already has; the client library implements the heartbeat rule (10 s rewrite, `running` older than 30 s is `failed`,
      "wrapper lost"). This removes the one place the wrapper needed to know a job's address on a read.
-2. **Processor entry point.** A Python package registers `cadmus_parser.processors` entry points:
+2. **Processor entry point.** A Python package registers `cadmus_parser.processors` entry points (the group name stays `cadmus_parser.processors`,
+   decided, although the service that loads them is `cadmus-parser-server`):
    `parse_job(sink, indir, job, work)`, exactly today's `parse.parse_job` signature, with no storage access and no network. The worker looks the
    name up in the installed entry points, so an unknown processor is a 400 at POST time and nothing the caller sends is imported.
 3. **Stack file.** `docker-compose.parse.yml` (a swarm stack file, deployed with `docker stack deploy -c … -c …`) defines `parser`, `blob-sidecar`
@@ -173,24 +182,52 @@ confinement are unchanged.
 **What replaces layer 2.** None of these is as strong as "the wrapper builds the key", but together they restore a confinement the operator
 controls instead of one fixed in the code:
 
-1. **`PARSE_ALLOWED_BASES` is required.** A list of URL prefixes (scheme, bucket, path prefix) the wrapper will accept for `input.url` and
-   `output.url`; the wrapper refuses to start without it. The consumer's old value, the operator's `RESEARCH_BLOB_URL`, is the natural default
-   for a single store. This restores "only the operator's store", at store-root granularity instead of job granularity. Checked on the
-   normalised URL (no `..` components, no encoded slashes, no trailing-slash tricks) and before anything is pulled.
-2. **Scheme allow-list.** Only the schemes the operator enables (`s3`, `gs`/`gcs`); a URL containing `::` (chaining) or any other scheme is a 400.
-3. **Option allow-list per scheme.** Only named options pass into fsspec (credentials: `key`, `secret`, `token`/`gcs_access_token`, `session`
-   token; `endpoint_url` only if it equals the operator's configured endpoint). Anything else is a 400. `token` given as a string path is refused
-   for `gcsfs` (only a downscoped access token string is accepted, as today's `gcs_access_token` path does).
-4. **No overlapping jobs.** The wrapper refuses (409) a job whose output base equals, contains or is contained by the output base of a running
-   job on that replica, and writes `status.json` with an ownership check across replicas by reading the existing one first (as the stale-heartbeat
-   rule already does).
-5. **Job-scoped credentials stay the consumer's job** and are stated as a requirement in the library docs: write limited to the output base, read
-   limited to the input base. The wrapper cannot verify it. A test in the library's own suite shows the failure mode with an over-broad credential.
-6. **Input size checked before pull** against the pre-classification ceiling (see Limits).
+1. **No base-URL allow-list (decided, open question 10).** The wrapper accepts any `input.url` and `output.url`. The consumer is trusted: it
+   decides the read base and the write base, and confines the credential(s) it gives the wrapper to exactly those two. `PARSE_ALLOWED_BASES` is
+   not part of the library.
+2. **No scheme or option allow-list (decided, open question 10).** The URL and the options go to fsspec as given: any scheme, chaining
+   (`::`), any option. The parser never sees or influences them, and the consumer is trusted. The library docs state that the consumer must
+   never build URLs or options from untrusted input, because they can name `file://`, `http://` or chained filesystems, or (for `gcsfs`) a local
+   credentials file.
+3. **Identical jobs only (decided).** The job's identity is its output base URL, and the wrapper refuses (409) a job whose output base is
+   *identical* to that of a job running on that replica, and, across replicas, to one whose `status.json` shows it running (the stale-heartbeat rule
+   already reads it first); this is today's behaviour with the URL in place of the job triple. Nested or overlapping bases are **not** detected:
+   keeping output bases disjoint is the consumer's responsibility, and the library docs say that nested bases share and can corrupt each other's
+   `status.json`, `index.json` and artefacts.
+4. **Job-scoped credentials (decided: the library ships a small minting helper).** The requirement is unchanged: the credential allows reading
+   the input base and writing the output base and nothing else, and the wrapper cannot verify it. The library contains a **small Python helper
+   for minting such credentials** (for S3 and GCS), generalised from this project's `gateway/creds.py`, which today builds a per-job IAM role,
+   policy and STS session for S3 and a Credential Access Boundary (downscoped token) for GCS, with a 900 s lifetime and a sweep of leftovers.
+   The consumer still decides when to mint and for which bases; the helper only turns "read base, write base, lifetime" into the `storage_options`
+   fragment the request needs. No test of the over-broad-credential failure mode.
+   **Details:** (a) **decided:** the S3 mechanism is a role and policy per job plus STS, as today (works on AWS and SeaweedFS; needs IAM permissions and a
+   sweep of leftover roles);
+   (b) **decided:** a generic `mint(grants, lifetime=900)` where `grants` is a list of `(url, "read" | "write")` entries. It returns a mapping
+   `{url: options}`, one entry per grant, where `options` is the `storage_options` fragment for that URL, so the consumer looks up each side by its
+   own URL (`input.options`, `output.options`). The helper groups grants by store and mints **one credential (one role, policy and session) per
+   store**; grants in the same store share it, and their entries in the mapping hold the same credential, so nothing is duplicated;
+   (c) **decided:** the dependencies (`boto3`, `google-auth`) are optional extras of the consumer-side (client) package (for example
+   `[mint-s3]` and `[mint-gcs]`), imported only when the helper uses that store; (d) **decided:** cleanup of leftovers. What `mint` returns is a **handle**: it behaves as the `{url: options}` mapping of (b) and has a
+   `revoke()` that removes the S3 role and policy it created straight away (GCS needs nothing, the token expires). The helper also provides
+   `sweep(max_age)`, which removes any helper-created role older than `max_age`; the consumer schedules it from its own periodic task, and the
+   helper names its roles with its own prefix so that `sweep` touches only those. Two additions: the handle can be **persisted** (serialised
+   to a plain structure, for example into a database, and restored later in another process to `revoke()` it), and it works as a **context
+   manager** (`with mint(...) as creds:` revokes at the exit of the block). The serialised form holds **only what is needed to
+   revoke** (role and policy identifiers, the store, the creation time) and **no secrets**, so it is safe in a database or a log; a restored handle
+   can `revoke()` but its credentials exist only in the process that minted them;
+   (e) **decided:** the helper lives in **the same package as the client** that consumers use, and **not** in the wrapper/parser package.
+   The library therefore builds **at least two installable packages**: a consumer-side one (client and minting helper, with the `boto3` and
+   `google-auth` extras) and a service-side one (wrapper, worker and the `files` processor), as `cadmus-parser` and `cadmus-parser-server`.
+5. **Input size checked in two steps (decided).** Before the pull, the wrapper lists the objects under the input base and sums their sizes
+   against the largest `input_mib` of any class (the operator's ceiling); this needs list permission on the input base, and a credential without
+   it gives a clear error. After the pull and the classification, the tree is checked against the job's class `input_mib` (see Limits) and the job
+   fails with a clear status before the parser starts if it is exceeded.
 
-**Residual risk to accept or reject** (listed in open question 10): confinement is now the operator's allow-list plus the credential, not
-the job. A stolen wrapper token plus a stolen or over-broad credential reaches whatever that credential reaches within the allowed roots, which
-is the same as the consumer could do directly; what is lost is only the wrapper's own extra layer.
+**Residual risk (accepted, open question 10):** with no scheme or option filtering either, a stolen wrapper token can also name `file://` or
+`http://` URLs and make the wrapper read its own files or make requests. confinement of the *consumer* is no longer the wrapper's job. A consumer bug, or a stolen
+wrapper token together with a credential, reaches whatever that credential reaches; with no base-URL allow-list a stolen token alone could also
+make the wrapper fetch from and upload to any store the blob-sidecar can reach. What the wrapper does guarantee is the confinement of the
+**parser** to the one reading prefix and the one writing prefix it was given.
 
 ### Images and process layout
 
@@ -223,15 +260,19 @@ Behaviour must be identical after each step, with the existing parser tests pass
 
 1. Create the library repo by **cloning this repository** (full history), pointing the clone's `origin` at
    `git@github.com:Dn-Media-Group-Public/cadmus-parser.git`, and turning the clone into the library: remove everything except `parser/`,
-   `blob-sidecar/`, `ocr-sidecar/`, `docker-compose.parse.yml` and `LICENSE`, rename the package to `cadmus_parser` and the images to
-   `cadmus-parser*`, and add the library's own README and CI (the existing unit tests). Nothing is pushed until the owner says so.
+   `blob-sidecar/`, `ocr-sidecar/`, `docker-compose.parse.yml` and `LICENSE`, split it into the two packages `cadmus-parser` (client, new, in `client/`) and `cadmus-parser-server` (the
+   existing `parser/` renamed to `server/`, with `spider_hoarder_parser` renamed to `cadmus_parser_server`), and rename the images to `cadmus-parser*`, and add the library's own README and CI (the existing unit tests). Nothing is pushed until the owner says so.
 2. Replace the three directories here with the submodule; fix build contexts in `deploy.sh` and the stack file.
-3. Generalise in the library, one commit per item, each with a test: input/output base URLs (with the URL allow-lists) and removal of the GET status endpoint, per-side credential pass-through, features
+3. Generalise in the library, one commit per item, each with a test: input/output base URLs and removal of the GET status endpoint, per-side credential pass-through, features
    registry, per-class limits (`PARSE_LIMITS`), processor entry points, output directories. This project sends `input` = `<job>/original`,
-   `output` = `<job>`; its config reproduces the old limits as `default.*`.
+   `output` = `<job>`; its config reproduces the old limits as `default.*`. Also here: the output-base identity check (409 for an identical base
+   only), the two-step input size check, wrapper-side classification into the six classes, and the `ocr-sidecar` moving to the common protocol
+   (`POST /process`, standard status codes, JSON error body).
 4. Move the `files` processor behind an entry point; this project selects it by default. Rename the `SpiderHoarder-*` metadata groups to `Cadmus-*`
    in the library and every place here that reads them, in one step.
-5. Move the client; `gateway/parse_client.py` shrinks to the inline-text and terse logic on top of it.
+5. Write the client (`client/`) and the minting helper (`mint`, generalised from `gateway/creds.py`: role and policy per job plus STS, handle with
+   `revoke()`, persistence and context manager, `sweep`); `gateway/parse_client.py` shrinks to the inline-text and terse logic on top of the client,
+   and `gateway/creds.py` is replaced by the helper.
 6. Overlay generator; `parse-overlay` here delegates to it.
 7. Docs (below) and `docs/implemented-plans/index.md`; move this plan.
 
@@ -241,14 +282,17 @@ The library repo must be usable by a project that has never heard of spider-hoar
 
 - `README.md`: the problem, the threat model, what is and is not protected, the parts.
 - Quickstart: a minimal consumer swarm stack and a toy processor, end to end.
-- Reference for the four contract surfaces (wrapper HTTP API, processor entry point, stack file, environment variables), with the environment
-  variable table and the limits (`PARSE_LIMITS`) reference.
-- "How to write a processor" and "how to build a consumer image".
-- Security guide: what the consumer must do (job-scoped credentials, building URLs from validated ids, keeping the wrapper token away from
-  untrusted data), and `PARSE_ALLOWED_BASES`.
+- Reference for the contract surfaces (wrapper HTTP API, processor entry point, stack file, environment variables, and the **sidecar protocol**
+  as a written spec for anyone adding a sidecar), with the environment variable table and the limits (`PARSE_LIMITS`) reference.
+- "How to write a processor", "how to build a consumer image" and "how to write a sidecar" (the protocol spec).
+- Client and minting helper: how a consumer calls the wrapper, reads `status.json`, and mints, persists, revokes and sweeps scoped credentials
+  (S3 and GCS, with the extras).
+- Security guide: what the consumer must do (job-scoped credentials, keeping output bases disjoint, never building URLs or options from
+  untrusted input, keeping the wrapper token away from untrusted data) and what the wrapper guarantees (the parser is confined to the one read
+  prefix and one write prefix).
 - Versioning and upgrade notes (API version, tags).
 
-## Open questions
+## Open questions (all decided)
 
 1. **Name, repo location and licence.** **Decided:** name `cadmus-parser`, repository
    `git@github.com:Dn-Media-Group-Public/cadmus-parser.git`, licence MIT, the same as spider-hoarder. The library must not carry this project's
@@ -267,32 +311,76 @@ The library repo must be usable by a project that has never heard of spider-hoar
 5. **Units and names of the limits.** **Decided:** self-describing names with the unit as a suffix: `deadline_s` (seconds), `ram_mib`,
    `fsize_mib`, `input_mib`, `output_mib` (MiB), plus the plain counts `nproc` and `nofile`. All the limit names above, in the examples and in the
    library docs and `.env.example`, use these.
-6. **Classification by the wrapper: the details.** The class set (`video`, `audio`, `image`, `document`, `archive`, `other`), the extension and
-   magic tables, and "maximum per limit over the files present" are proposals. The alternative the user named, classification inside the
-   sandbox, is described in the Limits section and not recommended. A tree that mixes a tiny file and a huge video gets the video's limits for
-   the whole job; per-file jobs would avoid that but need the consumer to split the tree.
-7. **No GET status endpoint.** Recommended (the consumer reads `status.json` from the store it already has credentials for, which is what lets
-   the wrapper stay ignorant of layout); the alternative keeps a `POST /jobs/status` taking the output URL and credential.
-8. **One shared running service across stacks?** The design says no (each stack runs its own, because the store and secrets are per stack). If a
-   future consumer wants a shared one, it needs per-consumer wrapper tokens and per-consumer `PARSE_ALLOWED_BASES`; not designed here.
-9. **Sidecar kinds beyond OCR.** The features registry allows more; the `ocr-sidecar` request format (`POST /ocr`, image in, text out) is not
-   generalised until a second kind exists.
-10. **Is operator allow-listing enough in place of key construction?** The plan says yes (see "Security changes"), at store-root granularity. If a
-    consumer needs finer confinement inside the wrapper, the library could take an optional `PARSE_JOB_REF` regex that the *consumer's* URLs must match
-    (a pattern, not a template: the library still would not build keys); not planned.
+6. **Classification by the wrapper: the details.** **Decided:**
+   - The **wrapper** classifies, before the parser starts. Today's code classifies inside the parser (`mimetypes` on the name in `parse.py`,
+     `metadata.py`, `extract.py`, plus a magic check for a few binary formats) and applies one global set of limits; per-class limits need the class
+     before the process starts, so classification moves to the wrapper. Classification inside the sandbox is rejected.
+   - **Extension first, magic number only as a fallback** when the extension says nothing, following the `mimetypes` approach used today. A
+     small built-in table of magic numbers covers the fallback.
+   - **Class set decided:** six classes, `video`, `audio`, `image`, `document`, `archive`, `other`. `PARSE_LIMITS` accepts exactly these keys
+     plus `default`.
+   - **Mixed trees decided:** the job's limit set is, per limit, the maximum over the classes present (0 = unlimited counts as the largest), as
+     in "Limits". A tiny file next to a huge video therefore runs under the video's limits. The docs mention that a consumer who needs tighter
+     limits can split the tree into one job per class itself; the wrapper does not split.
+7. **No GET status endpoint.** **Decided:** no GET and no `POST /jobs/status`. The consumer reads `status.json` and `index.json` from the output
+   base with the credential it already has; the client library implements the heartbeat rule. The wrapper stays ignorant of layout on reads.
+8. **One shared running service across stacks?** **Decided:** no. Each consuming stack runs its own instance (own store and tokens), so a compromise in one stack cannot reach another's data through the wrapper. A shared service, which would need
+   per-consumer wrapper tokens, allowed bases and pool quotas, is out of scope and would need its own plan.
+9. **Sidecar kinds beyond OCR.** **Decided:** define one common **sidecar protocol** now, so that adding a new sidecar is smooth. Each sidecar stays
+   specific to its job and does its own work behind the protocol (the `ocr-sidecar` still builds the prompt and talks to its endpoint; nothing
+   about OCR moves into the protocol or into the processor). The protocol is plain HTTP, bytes in and bytes out: the request body is the input
+   bytes, with headers such as `Content-Type` (MIME type) and `Content-Disposition` / filename for what they describe; the response body is the
+   result bytes with its own `Content-Type` and, where relevant, filename. The sidecar keeps holding its profile table and the per-profile
+   credentials, and the wrapper still gives a job only the requested profile's sidecar URL and token, as today. The `ocr-sidecar` is adapted to
+   this protocol.
+   **Tokens decided:** the per-profile token stays an **opaque secret that indexes the sidecar's own profile table** (the sidecar holds every
+   profile's full data, including upstream URL, model, API keys and prompt; the wrapper holds only name -> `{sidecar url, token}`; the sandboxed
+   process holds one token). Signed or encrypted tokens carrying profile data (JWT/JWE, public-key crypto) were considered and rejected: they
+   would move the API keys into the wrapper's configuration and add key management, for a property (a job can only use the profile it was given)
+   that the opaque token already provides.
+   **Details:**
+   - (a) **decided:** one route for every sidecar, `POST /process`: one file in (the body, with `Content-Type` and filename headers), parsed data
+     out. Nothing else names the feature or profile: what the sidecar does and which profile it uses is controlled by the token and the file
+     content. The `ocr-sidecar`'s `/ocr` becomes `/process`.
+   - (b) **decided:** a sidecar is **not a proxy**. It forwards no request header, ever. It reads the request headers itself and makes its own
+     choices from them: `Authorization: Bearer <token>` carries the token (which selects the profile), `Content-Type` describes the posted file
+     (`image/png`, a Word document, ...), `Content-Disposition` gives its filename, and any other header is allowed and is used as that sidecar
+     sees fit. What it sends upstream is built by the sidecar. The response carries `Content-Type` and, where relevant, `Content-Disposition`, set
+     by the sidecar. The only methods are `POST /process` and `GET /health` (as today).
+   - (c) **decided:** each sidecar defines its own size caps, concurrency and timeouts (as the `ocr-sidecar` does with `OCR_MAX_BODY`,
+     `OCR_MAX_CONCURRENT` and its upstream timeout); there are no protocol-wide numbers. The protocol requires only that a sidecar enforces *some*
+     request-size limit and answers `413` when it is exceeded, and answers `503` when it is busy. The library docs state this.
+   - (d) **errors decided:** a sidecar uses the standard HTTP status codes with their standard meanings; the protocol defines no codes of its own.
+     An error response has a JSON body with an `error` member (a string describing the error) and may have a `traceback` member (a string with a
+     formatted traceback). Whether a `traceback` is sent, and what it contains, is **the sidecar's own decision**: it knows its setup and what could
+     leak, and may decide differently per call. The protocol sets no rule. **Options** travel as extra request headers that the sidecar interprets,
+     as decided in (b); their names use the standard HTTP `X-` prefix only (for example `X-Language`), with no project-specific prefix.
+     (d) is fully decided;
+   - (e) **decided:** the library gives a **written spec only** for the sidecar protocol (route, headers, status codes, error body, the `413`/`503`/
+     `GET /health` requirements). No conformance test suite and no skeleton service; the library's own sidecars have their own unit tests.
+     Open question 9 is fully decided.
+10. **Confinement in place of key construction.** **Decided (partly):** the consumer is **trusted**; the parser is the one that may be hostile.
+    The wrapper's guarantee is therefore to confine the parser to **one reading prefix** (`input.url`: the wrapper pulls only from it) and **one
+    writing prefix** (`output.url`: the wrapper uploads only under it, from validated relative paths). No `PARSE_JOB_REF` pattern and no
+    mandatory key shape; the library builds no keys. **`PARSE_ALLOWED_BASES` is dropped:** the wrapper accepts any base URLs; it is the consumer's job to choose them and to confine the
+    credential(s) to those two prefixes. **The scheme and option allow-lists are dropped too**
+    (the parser never sees the URLs or options, so they only matter for a stolen token or a consumer bug, which is accepted as for the bases).
+    Open question 10 is fully decided.
 
 ## Files to change
 
 | File | Change |
 |---|---|
-| `lib/cadmus-parser/` (new submodule), `.gitmodules` | the library |
-| `parser/`, `blob-sidecar/`, `ocr-sidecar/` | removed (moved into the library) |
+| `lib/cadmus-parser/` (new submodule), `.gitmodules` | the library (repo `cadmus-parser`: `client/`, `server/`, `blob-sidecar/`, `ocr-sidecar/`, `docker-compose.parse.yml`) |
+| `parser/`, `blob-sidecar/`, `ocr-sidecar/` | removed (moved into the library; `parser/` becomes `server/`) |
 | `parser/Dockerfile` replacement (here) | `FROM` the library base image; installs the processor, ExifTool, ffmpeg, `unar` |
 | `docker-compose.parse.yml` | removed here; the library's file is included |
 | `deploy.sh` | submodule init and check, base image build, stack file path |
-| `scripts/spider_hoarder.py` | `parse-overlay`, `parse-env`, `build-parse` delegate to the library generator |
-| `sdk/spider_hoarder_sdk/gateway/parse_client.py` | thin layer over the library client |
-| `.env.example` | `PARSE_LIMITS` (dotted notation documented), `PARSE_ALLOWED_BASES`, processor settings, with this project's values |
+| `scripts/spider_hoarder.py` | `parse-overlay`, `parse-env`, `build-parse` delegate to the library generator; `PARSE_LIMITS`, no `PARSE_ALLOWED_BASES` |
+| `sdk/spider_hoarder_sdk/gateway/parse_client.py` | thin layer over the library client (`cadmus-parser`) |
+| `sdk/spider_hoarder_sdk/gateway/creds.py` | replaced by the library's minting helper (`cadmus_parser`, extras `[mint-s3]`/`[mint-gcs]`); this project keeps only its policy for which bases to mint |
+| `tests/live/e2e_parser.py`, `docs/architecture/jobs-and-storage.md`, `docs/implemented-plans/file-metadata.md` | `SpiderHoarder-<Format>` metadata groups renamed to `Cadmus-<Format>` (migration step 4) |
+| `.env.example` | `PARSE_LIMITS` (dotted notation, unit-suffixed names), processor settings, with this project's values |
 | `README.md`, `CLAUDE.md` | clone with `--recurse-submodules`; where the parser code now lives |
 
 ## Docs to update
@@ -301,7 +389,8 @@ The library repo must be usable by a project that has never heard of spider-hoar
   now lives in the library; keep the security description and link to the library docs.
 - `docs/architecture/backend-plugins.md`: parse wiring through the generator.
 - `docs/operations/deploy-and-configure.md`: submodule, the new variables, per-class limits (`PARSE_LIMITS`).
+- `docs/architecture/jobs-and-storage.md`: the `Cadmus-*` metadata groups, the sidecar protocol and the removal of the status endpoint.
 - `docs/implemented-plans/parser-wrapper.md`: a "See also" to this plan; `docs/plans/ocr-hybrid.md`: amended to say the work is in the library.
 - `docs/plans/index.md` (now), `docs/implemented-plans/index.md` (on implementation).
-- In the library: `README.md` (what it is, the four contract surfaces, swarm deploy), the security model (moved from the parser-wrapper plan), the
-  environment table, and how to write a processor.
+- In the library: see "Library documentation (requirement)" (README, quickstart, contract reference including the sidecar protocol spec, how to
+  write a processor and a sidecar, the client and minting helper, the security guide, versioning).
