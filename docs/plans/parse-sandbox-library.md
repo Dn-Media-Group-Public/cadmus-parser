@@ -30,7 +30,7 @@ Non-goals: new processing features (video, face detection and so on belong to a 
 
 ### What the library is
 
-A repository `<name>` (see open question 1), submodule path `lib/<name>/`, versioned with tags. It contains:
+A repository `cadmus-parser` (`git@github.com:Dn-Media-Group-Public/cadmus-parser.git`, MIT), submodule path `lib/cadmus-parser/`, versioned with tags. It contains:
 
 | Part | From | Notes |
 |---|---|---|
@@ -42,7 +42,7 @@ A repository `<name>` (see open question 1), submodule path `lib/<name>/`, versi
 | `client` (POST, read `status.json`/`index.json` from the output base with backoff and the heartbeat rule, one retry on 503/refused connection) | `sdk/.../gateway/parse_client.py` minus the inline-text logic | the inline-text and terse logic is the consumer's |
 | base image | `parser/Dockerfile` | wrapper, Python, tini, util-linux, fsspec; **no** processor and no format tools |
 | stack file and overlay generator | `docker-compose.parse.yml`, `scripts/spider_hoarder.py parse-overlay` | see "Deployment" |
-| default processor `files` (optional extra) | `parse.py`, `extract.py`, `metadata.py`, `ocr.py` | see open question 2 |
+| default processor `files` (optional extra) | `parse.py`, `extract.py`, `metadata.py`, `ocr.py` | decided (open question 2): moves, `terse/`/`simplified/` included, groups renamed `Cadmus-*` |
 
 It does **not** contain: scoped credential minting (the consumer mints, the wrapper only receives one per request), authorisation of end users
 (the consumer authorises; the wrapper authorises only the consumer by its token, as today), or anything that reads the result and turns it into
@@ -68,7 +68,7 @@ the major version and the consumer pins a tag):
      under the output base, `index.json` before `status.json`, and writes `running` before it answers 202. The consumer reads them from the store
      with the credential it already has; the client library implements the heartbeat rule (10 s rewrite, `running` older than 30 s is `failed`,
      "wrapper lost"). This removes the one place the wrapper needed to know a job's address on a read.
-2. **Processor entry point.** A Python package registers `parse_sandbox.processors` entry points:
+2. **Processor entry point.** A Python package registers `cadmus_parser.processors` entry points:
    `parse_job(sink, indir, job, work)`, exactly today's `parse.parse_job` signature, with no storage access and no network. The worker looks the
    name up in the installed entry points, so an unknown processor is a 400 at POST time and nothing the caller sends is imported.
 3. **Stack file.** `docker-compose.parse.yml` (a swarm stack file, deployed with `docker stack deploy -c … -c …`) defines `parser`, `blob-sidecar`
@@ -91,29 +91,32 @@ the major version and the consumer pins a tag):
   notation, as the docs and `.env.example` write it:
 
   ```
-  default.deadline = 600      default.ram = 6144       default.fsize = 4096   default.input = 50      default.output = 4096
-  video.deadline   = 3600     video.ram   = 0          video.fsize   = 65536  video.input   = 0       video.output   = 0
-  image.ram        = 44
+  default.deadline_s = 600    default.ram_mib = 6144    default.fsize_mib = 4096    default.input_mib = 50      default.output_mib = 4096
+  video.deadline_s   = 3600   video.ram_mib   = 16384   video.fsize_mib   = 16384   video.input_mib   = 20480   video.output_mib   = 20480
+  image.ram_mib      = 44
   ```
 
-  - Names: `deadline` (wall clock, seconds, then the process group is killed), `ram` (address space per parser, MiB; 0 = no `RLIMIT_AS`, rely on
-    the container memory limit), `fsize` (largest single output file, MiB, `RLIMIT_FSIZE`), `input` (largest input tree, MiB; 0 = unlimited;
-    replaces `MAX_PARSE_BYTES`), `output` (total bytes uploaded for a job, MiB; 0 = unlimited), and `nproc` / `nofile` as today.
+  - Names (the unit is part of the name): `deadline_s` (wall clock, seconds, then the process group is killed), `ram_mib` (address space per parser, MiB; 0 = no `RLIMIT_AS`, rely on
+    the container memory limit), `fsize_mib` (largest single output file, MiB, `RLIMIT_FSIZE`), `input_mib` (largest input tree, MiB; 0 = unlimited;
+    replaces `MAX_PARSE_BYTES`), `output_mib` (total uploaded for a job, MiB; 0 = unlimited), and `nproc` / `nofile` (plain counts, no unit) as today.
+  - **Every built-in default is finite, for every class, including `video`** (open question 4): large where a class needs it, but never
+    unlimited, so a job cannot exhaust the wrapper's scratch disk or memory. `0` (unlimited) is accepted only when the operator sets it
+    explicitly in `PARSE_LIMITS`; the library never ships it. The disk bound is `input_mib` + `output_mib` + `fsize_mib`, since `RLIMIT_AS` does not limit disk.
   - A class has the built-in default of each limit (today's values), overridden by `default.*` if set, overridden by `<class>.*` if set. A limit
     not mentioned for a class falls through.
   - **The wrapper picks the class; neither the consumer nor the parser does.** The classes are a small fixed set defined by the library
     (`video`, `audio`, `image`, `document`, `archive`, `other`), so the operator's `PARSE_LIMITS` keys are known. After the wrapper has pulled the
     input tree, it classifies **each file** by extension and, failing that, by comparing its first 16 bytes with a built-in table of magic numbers
     (stdlib byte comparison; the wrapper decodes nothing). The job's limit set is, **per limit, the maximum over the classes present** (a tree
-    with a photo and a video gets the video's deadline and the larger of the two `ram` values; a limit of 0 = unlimited counts as the largest).
+    with a photo and a video gets the video's deadline and the larger of the two `ram_mib` values; a limit of 0 = unlimited counts as the largest).
     An archive gets the `archive` class for itself and everything in it: its members are only known after unpacking, which happens inside the
     parser under the limits already chosen, so the operator should set `archive.*` generously and the existing archive caps
     (`MAX_ARCHIVE_BYTES`, `MAX_ARCHIVE_MEMBERS`) remain the bound on what an archive can expand to.
   - Why the wrapper and not the parser: `RLIMIT_AS`, `RLIMIT_FSIZE` and the deadline are fixed when the parser process is started and cannot be raised
     by it afterwards, so the class has to be known before the start; a parser-side classification would need a separate sniffing process first
     (a second start per job) and would let a hostile file name the class it wants. The wrapper reading 16 bytes per file as a byte comparison is
-    the smallest thing that works. Ordering: the pull itself is capped at the largest `input` of any class (the operator's ceiling), then the
-    class's own `input` is checked before the parser starts and the job fails with a clear status if it is exceeded.
+    the smallest thing that works. Ordering: the pull itself is capped at the largest `input_mib` of any class (the operator's ceiling), then the
+    class's own `input_mib` is checked before the parser starts and the job fails with a clear status if it is exceeded.
   - **Only the operator sets numbers.** A caller cannot pass or raise a limit.
   - Hours-long jobs: the wrapper's heartbeat is unchanged; the client's poll window is a parameter (default 12 min), so a consumer with long
     classes polls longer or reads `status.json` asynchronously.
@@ -164,7 +167,7 @@ confinement are unchanged.
 - *Overlapping jobs.* The job's identity is its output URL. Two jobs whose output bases are equal or nested (`x/` and `x/y/`) share or contain each
   other's `status.json`, `index.json` and artefacts: one can report the other as `running`/`done`, or be restarted by it as "stale". The old
   design had the same collision only for an identical job triple; nesting could not occur.
-- *Resource abuse.* A caller can name an arbitrarily large input tree. The `input` limit is checked against the object listing before anything is
+- *Resource abuse.* A caller can name an arbitrarily large input tree. The `input_mib` limit is checked against the object listing before anything is
   pulled (it needs a listing right in the credential, which any working job has).
 
 **What replaces layer 2.** None of these is as strong as "the wrapper builds the key", but together they restore a confinement the operator
@@ -191,7 +194,7 @@ is the same as the consumer could do directly; what is lost is only the wrapper'
 
 ### Images and process layout
 
-The library builds a **base image** (`<IMAGE_PREFIX><name>-base:<tag>`). A consumer's own Dockerfile starts `FROM` it, installs its processor
+The library builds a **base image** (`<IMAGE_PREFIX>cadmus-parser-base:<tag>`). A consumer's own Dockerfile starts `FROM` it, installs its processor
 package and its format tools (ExifTool, ffmpeg, Tesseract, `unar`, …), and the entry script of the base image starts the wrapper. One consumer image
 per stack; the sidecars are used as built by the library. Build context concerns (this project builds with the repo root as context) are handled by
 `deploy.sh` building the base image from the submodule directory first.
@@ -206,9 +209,9 @@ this one when this plan is implemented.
 
 ### Deployment
 
-- Submodule at `lib/<name>/`, pinned to a tag. `git clone --recurse-submodules`; `deploy.sh` runs `git submodule update --init` and fails with a
+- Submodule at `lib/cadmus-parser/`, pinned to a tag. `git clone --recurse-submodules`; `deploy.sh` runs `git submodule update --init` and fails with a
   clear message if the directory is empty. Docs and `README.md` say so.
-- `deploy.sh` includes `lib/<name>/docker-compose.parse.yml` where it includes `docker-compose.parse.yml` today; the project-specific overlay
+- `deploy.sh` includes `lib/cadmus-parser/docker-compose.parse.yml` where it includes `docker-compose.parse.yml` today; the project-specific overlay
   (a `<backend>-parse` network per gateway, `PARSE_URL`/`PARSE_TOKEN` in each gateway, the dev store's network, `PARSE_PROXY_ALLOW`) stays here
   but is produced by the library's small overlay generator, which takes a list of consumer service names and an optional dev-store address and prints a
   stack file fragment. The generator is the library's only deploy-time code; this project's `scripts/spider_hoarder.py` calls it.
@@ -218,30 +221,52 @@ this one when this plan is implemented.
 
 Behaviour must be identical after each step, with the existing parser tests passing against the moved code.
 
-1. Create the repo from `parser/`, `blob-sidecar/`, `ocr-sidecar/`, preserving history (`git filter-repo` per path, open question 3), with its
-   own CI (the existing unit tests).
+1. Create the library repo by **cloning this repository** (full history), pointing the clone's `origin` at
+   `git@github.com:Dn-Media-Group-Public/cadmus-parser.git`, and turning the clone into the library: remove everything except `parser/`,
+   `blob-sidecar/`, `ocr-sidecar/`, `docker-compose.parse.yml` and `LICENSE`, rename the package to `cadmus_parser` and the images to
+   `cadmus-parser*`, and add the library's own README and CI (the existing unit tests). Nothing is pushed until the owner says so.
 2. Replace the three directories here with the submodule; fix build contexts in `deploy.sh` and the stack file.
 3. Generalise in the library, one commit per item, each with a test: input/output base URLs (with the URL allow-lists) and removal of the GET status endpoint, per-side credential pass-through, features
    registry, per-class limits (`PARSE_LIMITS`), processor entry points, output directories. This project sends `input` = `<job>/original`,
    `output` = `<job>`; its config reproduces the old limits as `default.*`.
-4. Move the `files` processor (if decided) behind an entry point; this project selects it by default.
+4. Move the `files` processor behind an entry point; this project selects it by default. Rename the `SpiderHoarder-*` metadata groups to `Cadmus-*`
+   in the library and every place here that reads them, in one step.
 5. Move the client; `gateway/parse_client.py` shrinks to the inline-text and terse logic on top of it.
 6. Overlay generator; `parse-overlay` here delegates to it.
 7. Docs (below) and `docs/implemented-plans/index.md`; move this plan.
 
+### Library documentation (requirement)
+
+The library repo must be usable by a project that has never heard of spider-hoarder, so its docs contain no spider-hoarder concepts or examples:
+
+- `README.md`: the problem, the threat model, what is and is not protected, the parts.
+- Quickstart: a minimal consumer swarm stack and a toy processor, end to end.
+- Reference for the four contract surfaces (wrapper HTTP API, processor entry point, stack file, environment variables), with the environment
+  variable table and the limits (`PARSE_LIMITS`) reference.
+- "How to write a processor" and "how to build a consumer image".
+- Security guide: what the consumer must do (job-scoped credentials, building URLs from validated ids, keeping the wrapper token away from
+  untrusted data), and `PARSE_ALLOWED_BASES`.
+- Versioning and upgrade notes (API version, tags).
+
 ## Open questions
 
-1. **Name, repo location and licence** of the library (it must be usable by systems that are not this project and must not carry this
-   project's name). Decision needed before step 1.
-2. **Does the default `files` processor (markitdown, trafilatura, archives, binary decoders, ExifTool/`ffprobe`/GDAL metadata, OCR) move into the
-   library?** Recommended yes: it is generic and the OCR work lands there anyway. Two outputs, `terse/` and `simplified/`, serve this project's
-   agent tools; either they move with it (consumers ignore them) or they become a processor option `outputs` that this project sets.
-3. **History.** Rewrite with `git filter-repo` per directory (blame survives, recommended) or start the library repo with a squashed first
-   commit (simpler).
-4. **`ram = 0` (no `RLIMIT_AS`) for heavy decoders.** The plan allows it per class and relies on the container memory limit; whether that is
-   acceptable for a class that decodes hostile video is for the operator to measure when the first such processor is added.
-5. **Units and names of the limits.** The plan uses seconds for `deadline` and MiB for `ram`/`fsize`/`input`/`output` (so `image.ram = 44` is
-   44 MiB, which a Tesseract run will not fit in; the example only shows the syntax). Confirm the units and the name set.
+1. **Name, repo location and licence.** **Decided:** name `cadmus-parser`, repository
+   `git@github.com:Dn-Media-Group-Public/cadmus-parser.git`, licence MIT, the same as spider-hoarder. The library must not carry this project's
+   name and must be fully usable, and documented, for a separate project that knows nothing about spider-hoarder (see "Library documentation").
+2. **The default `files` processor.** **Decided:** it moves into the library (markitdown, trafilatura, archives, binary decoders,
+   ExifTool/`ffprobe`/GDAL metadata, OCR), as an optional extra. The `terse/` and `simplified/` outputs move with it and are always written;
+   consumers that do not want them ignore them (no `outputs` option). The ExifTool extension groups are renamed from `SpiderHoarder-<Format>` to
+   `Cadmus-<Format>` (`Cadmus-Media`, `Cadmus-Raster`, `Cadmus-Vector`, `Cadmus-Office`, `Cadmus-PDF`); this changes output this project reads
+   today, so the rename and the reading code here are changed in the same step (migration step 4).
+3. **History.** **Decided:** keep it by cloning this repository in full and reducing the clone to the library (migration step 1), instead of
+   `git filter-repo` or a squashed first commit. The new repo therefore carries the whole of this project's history, including paths that are
+   not part of the library.
+4. **Heavy decoders and `ram`.** **Decided:** large but finite built-in defaults for every limit of every class, so the wrapper cannot run
+   out of disk or memory; `0` (unlimited) stays possible only as an explicit operator setting. The numbers for heavy classes are chosen when the
+   first such processor is added; the example in "Limits" is illustrative.
+5. **Units and names of the limits.** **Decided:** self-describing names with the unit as a suffix: `deadline_s` (seconds), `ram_mib`,
+   `fsize_mib`, `input_mib`, `output_mib` (MiB), plus the plain counts `nproc` and `nofile`. All the limit names above, in the examples and in the
+   library docs and `.env.example`, use these.
 6. **Classification by the wrapper: the details.** The class set (`video`, `audio`, `image`, `document`, `archive`, `other`), the extension and
    magic tables, and "maximum per limit over the files present" are proposals. The alternative the user named, classification inside the
    sandbox, is described in the Limits section and not recommended. A tree that mixes a tiny file and a huge video gets the video's limits for
@@ -260,7 +285,7 @@ Behaviour must be identical after each step, with the existing parser tests pass
 
 | File | Change |
 |---|---|
-| `lib/<name>/` (new submodule), `.gitmodules` | the library |
+| `lib/cadmus-parser/` (new submodule), `.gitmodules` | the library |
 | `parser/`, `blob-sidecar/`, `ocr-sidecar/` | removed (moved into the library) |
 | `parser/Dockerfile` replacement (here) | `FROM` the library base image; installs the processor, ExifTool, ffmpeg, `unar` |
 | `docker-compose.parse.yml` | removed here; the library's file is included |

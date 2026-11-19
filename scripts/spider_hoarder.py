@@ -361,6 +361,9 @@ def build_command(tag: str, dockerfile: str, context: str, environ) -> list[str]
     for a in dockerfile_args(dockerfile):
         if environ.get(a):
             cmd += ["--build-arg", f"{a}={environ[a]}"]
+    base = re.search(r"^ARG\s+BASE_IMAGE=(\S+)", open(dockerfile).read(), re.M)
+    if base:   # the family base image was tagged with the same prefix/tag, so FROM must name that, not `:local`
+        cmd += ["--build-arg", f"BASE_IMAGE={image_ref(base[1], environ)}"]
     return cmd + [context]
 
 
