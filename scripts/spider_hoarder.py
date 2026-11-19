@@ -10,7 +10,7 @@ descriptors with importlib.metadata and uses PyYAML for the overlay check; see d
   build              docker build -f <Dockerfile> <repo root> (and push, when IMAGE_PREFIX is set) every image of the enabled backends, once per tag
   build-image TAG CTX  the same for one image outside the descriptors (deploy.sh's oauth2-proxy-dcr)
   pin FILE           placement overlay: base oauth2-proxy and every enabled backend's `pinned` services on $PIN_DATA
-                     (writes nothing when PIN_DATA is empty)
+                     (+ seaweedfs with SEAWEEDFS=1; writes nothing when PIN_DATA is empty)
   post-build         run each backend's post_build script
   env                `export K=V` lines: every backend's env(environ) result, BACKENDS and BACKEND_SERVERS
   landing FILE       the static landing page (claude mcp add lines + each backend's title and description)
@@ -387,6 +387,8 @@ def pin_overlay(backends: list[Backend], environ) -> str:
     if not constraint:
         return ""
     names = list(BASE_PINNED)
+    if environ.get("SEAWEEDFS") == "1":
+        names.append("seaweedfs")  # its data volume is node-local
     for b in backends:
         names += [s for s in b.optional("pinned") or [] if s not in names]
     return 'version: "3.8"\nservices:\n' + "".join(

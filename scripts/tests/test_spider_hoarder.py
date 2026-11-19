@@ -428,6 +428,8 @@ def test_pin_overlay(tmp_path):
     o = yaml.safe_load(sh.pin_overlay([b], {"PIN_DATA": "node.labels.storage == primary"}))
     assert sorted(o["services"]) == ["dummy-one-helper", "oauth2-proxy"]
     assert o["services"]["oauth2-proxy"]["deploy"]["placement"]["constraints"] == ["node.labels.storage == primary"]
+    o = yaml.safe_load(sh.pin_overlay([b], {"PIN_DATA": "x == y", "SEAWEEDFS": "1"}))
+    assert "seaweedfs" in o["services"]
     d.pinned = ["not-a-service"]
     assert "pinned lists not-a-service" in "\n".join(sh.check_descriptor(b))
 
