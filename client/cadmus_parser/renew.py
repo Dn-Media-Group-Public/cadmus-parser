@@ -18,8 +18,10 @@ class RenewLoop:
     unreachable), `finished` when it answered 410; the consumer then marks the job failed ("wrapper lost") or lets the status say."""
 
     def __init__(self, client, grants, job_id: str, owner: str, first=None, interval: float = 300, lifetime: int = 900, options: dict | None = None,
-                 retries: int = 3, retry_delay: float = 1):
-        self.client, self.grants, self.id, self.owner = client, list(grants), job_id, owner
+                 retries: int = 3, retry_delay: float = 1, rekey: Mapping | None = None, on_mint=None):
+        """`rekey` = {grant url: posted url} when a grant was wider than a posted url (see Client.renew). `on_mint(handle)` is called with every
+        handle the loop mints, for a consumer that keeps a registry of live credentials."""
+        self.client, self.grants, self.id, self.owner, self.rekey, self.on_mint = client, list(grants), job_id, owner, rekey, on_mint
         self.interval, self.lifetime, self.options, self.retries, self.retry_delay = interval, lifetime, options, retries, retry_delay
         self.handles = [first] if first is not None else []
         self.lost = self.finished = False
@@ -28,10 +30,15 @@ class RenewLoop:
         self._thread = threading.Thread(target=self._run, daemon=True, name=f"renew-{job_id[:6]}")
         self._thread.start()
 
+    @property
+    def current(self):
+        """The newest handle: what a reader of the job's output should use (an older one is revoked after two renewals)."""
+        return self.handles[-1]
+
     def _send(self, creds: Mapping) -> int | None:
         for attempt in range(self.retries):
             try:
-                code = self.client.renew(self.owner, self.id, creds)
+                code = self.client.renew(self.owner, self.id, creds, self.rekey)
             except httpx.TransportError:
                 code = None
             if code is not None and code != 503:
@@ -54,6 +61,8 @@ class RenewLoop:
                 self.finished, self.lost, self.error = code == 410, code in (None, 404), f"renewal answered {code}"
                 return
             self.handles.append(h)
+            if self.on_mint:
+                self.on_mint(h)
             while len(self.handles) > 2:  # the one before the last may still be in use by a transfer that began before this renewal
                 self.handles.pop(0).revoke()
 

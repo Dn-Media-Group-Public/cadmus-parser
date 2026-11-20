@@ -130,7 +130,7 @@ def test_renew_loop_pushes_fresh_credentials_and_revokes_old_ones(svc, monkeypat
     sent, minted = [], []
     monkeypatch.setattr(renew, "mint", lambda grants, lifetime, options: minted.append(FakeHandle(grants)) or minted[-1])
     real = s.client.renew
-    s.client.renew = lambda owner, jid, creds: (sent.append(dict(creds)), real(owner, jid, creds))[1]
+    s.client.renew = lambda owner, jid, creds, rekey=None: (sent.append(dict(creds)), real(owner, jid, creds, rekey))[1]
     grants = [(s.input, "read"), (s.output, "write")]
     first = FakeHandle(grants)
     st = s.client.post(s.input, s.output, first)
@@ -163,3 +163,24 @@ def test_renew_loop_stops_when_the_job_is_finished_or_lost(svc, monkeypatch):
         time.sleep(0.05)
     assert gone.lost  # a persistent connection error means the replica is gone
     gone.stop()
+
+
+def test_a_grant_wider_than_the_posted_urls_is_rekeyed_and_the_reader_follows_the_current_credential(svc, monkeypatch):
+    from cadmus_parser import renew
+    s = svc("time.sleep(1)", heartbeat=0.2)
+    wide_in, wide_out = f"file://{s.root}", s.output  # a project-wide read grant, a job-wide write grant
+    grants = [(wide_in, "read"), (wide_out, "write")]
+    rekey = {wide_in: s.input}
+    seen, minted = [], []
+    real = s.client.renew
+    s.client.renew = lambda owner, jid, creds, rk=None: (seen.append(rk), real(owner, jid, creds, rk))[1]
+    monkeypatch.setattr(renew, "mint", lambda g, l, o: minted.append(FakeHandle(g)) or minted[-1])
+    first = FakeHandle(grants)
+    st = s.client.post(s.input, s.output, input_options=first[wide_in], output_options=first[wide_out])
+    tracked = []
+    loop = renew_loop(s.client, grants, st.id, st.owner, first, interval=0.1, rekey=rekey, on_mint=tracked.append)
+    time.sleep(0.6)
+    assert seen and all(r == rekey for r in seen) and tracked and tracked[-1] is loop.current  # renewals matched the posted input url, 200 each time
+    assert not loop.lost and not loop.finished
+    assert s.client.wait(s.output, lambda: loop.current[wide_out])["status"] == "done"  # callable options: the newest credential
+    loop.stop()
