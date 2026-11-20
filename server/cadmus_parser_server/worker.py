@@ -96,7 +96,8 @@ class _PipeSink(Sink):
 
 class File:
     """What a processor is asked about: `path` on disk, `address` (["a.zip", "docs/m.pdf"]), `rel` (the address as one name, "a.zip.d/docs/m.pdf",
-    for naming outputs), `depth` (0 = an input file, > 0 = an archive member), `derived` (an input that an earlier run unpacked from an archive)."""
+    for naming outputs), `depth` (0 = an input file, > 0 = an archive member), `derived` (an input that an earlier run unpacked from an archive: it
+    is parsed like any file, never unpacked itself)."""
 
     def __init__(self, path: str, address: list, derived: bool = False):
         self.path, self.address, self.derived = path, address, derived
@@ -147,7 +148,7 @@ class Runner:
             sink.note("not parsed (no processor)")
 
     def run_tree(self, root: str) -> None:
-        """Every file under `root`; a file inside `<x>.d/` next to an input `<x>` is a member from an earlier run (derived)."""
+        """Every file under `root`; a file inside `<x>.d/` next to an input `<x>` is one an earlier run unpacked from it (derived)."""
         paths = sorted(os.path.relpath(os.path.join(d, n), root) for d, _, names in os.walk(root) for n in names)
         for path in paths:
             parts = path.split("/")

@@ -96,7 +96,8 @@ def test_end_to_end_index_is_per_input_and_recursive(service):
     j2 = s.job({"d/b.zip": zb.getvalue(), "d/b.zip.d/in.zip": b"PK"})
     j2.post()
     j2.wait()
-    assert "files" not in j2.index()["files"]["d/b.zip.d/in.zip"] and "d/b.zip" in j2.index()["files"]
+    f2 = j2.index()["files"]
+    assert set(f2) == {"d/b.zip", "d/b.zip.d/in.zip"} and "files" not in f2["d/b.zip"] and "files" not in f2["d/b.zip.d/in.zip"]  # stored members are inputs of their own
 
 
 def test_unhandled_files_and_failures_are_notes(service):

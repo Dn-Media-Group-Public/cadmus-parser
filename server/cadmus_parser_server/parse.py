@@ -72,7 +72,7 @@ def parse_file(sink, ctx, file, ctype: str, base_url: str = "") -> None:
         sink.put_bytes(f"metadata/{path}.yaml", text.encode(), "application/yaml")
     if size > MAX_PARSE_BYTES:
         return sink.note(f"{path} not parsed ({size} bytes > MAX_PARSE_BYTES)")
-    if not file.depth and not file.derived and extract.archive_kind(ctype, path):
+    if not file.depth and not file.derived and not os.path.isdir(src + ".d") and extract.archive_kind(ctype, path):  # a `<x>.d/` next to it: unpacked before
         try:
             with open(src, "rb") as af:
                 members = extract.unpack_archive(af, path, ctype, MAX_ARCHIVE_MEMBERS, MAX_ARCHIVE_BYTES, [])
@@ -105,5 +105,5 @@ class Files:
     def process(self, sink, file, ctx) -> None:
         ctype = (ctx.options.get("ctypes") or {}).get(file.rel) or _ctype(file.name if file.depth else file.rel)
         parse_file(sink, ctx, file, ctype, ctx.options.get("base_url") or "")
-        if file.depth and os.path.exists(file.path):  # an archive member is also kept, as an output of its own entry
+        if file.path.startswith(ctx.work + os.sep) and os.path.exists(file.path):  # a member unpacked now is also kept, as an output of its own entry
             sink.put_file(f"original/{file.rel}", file.path, ctype)
