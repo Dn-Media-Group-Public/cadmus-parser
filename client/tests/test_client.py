@@ -184,3 +184,27 @@ def test_a_grant_wider_than_the_posted_urls_is_rekeyed_and_the_reader_follows_th
     assert not loop.lost and not loop.finished
     assert s.client.wait(s.output, lambda: loop.current[wide_out])["status"] == "done"  # callable options: the newest credential
     loop.stop()
+
+
+def test_run_is_the_whole_job_and_handles_wide_grants(svc, monkeypatch):
+    from cadmus_parser import client as cl, minting, renew
+    s = svc("os.write(1, json.dumps({'in': ['a.md'], 'note': 'hi'}).encode() + b'\\n')")
+    made = []
+    fake = lambda grants, lifetime, options: made.append(FakeHandle(grants)) or made[-1]  # noqa: E731
+    monkeypatch.setattr(minting, "mint", fake)
+    monkeypatch.setattr(renew, "mint", fake)
+    status, index = s.client.run(s.input, s.output)
+    assert status["status"] == "done" and index["files"]["a.md"]["notes"] == "hi" and made and all(h.revoked for h in made)  # credentials revoked at the end
+    made.clear()
+    seen = []
+    on_mint = seen.append
+    s2 = svc("time.sleep(0.5)", heartbeat=0.2)
+    os.makedirs(f"{s2.root}/in", exist_ok=True)
+    status, index = s2.client.run(s2.input, s2.output, [(f"file://{s2.root}", "write")], renew_every=0.1, on_mint=on_mint)  # one grant above both posted urls
+    assert status["status"] == "done" and len(seen) >= 2 and all(h.revoked for h in seen)
+    with pytest.raises(ValueError):
+        cl._grant_for({"s3://a/b": {}}, "s3://other/x")
+    assert cl._grant_for({"s3://a/b": {}, "s3://a/b/c": {}}, "s3://a/b/c/d") == "s3://a/b/c" and cl._grant_for({"s3://a/b": {}}, "s3://a/b") == "s3://a/b"
+    with pytest.raises(ParseError):
+        Client(s.client.url, "wrong").run(s.input, s.output)
+    assert all(h.revoked for h in made)

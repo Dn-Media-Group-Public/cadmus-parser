@@ -57,7 +57,7 @@ networks:
 import os
 
 import fsspec
-from cadmus_parser import Client, mint, renew_loop
+from cadmus_parser import Client
 
 store = {"key": os.environ["STORE_KEY"], "secret": os.environ["STORE_SECRET"]}      # your own identity: minting needs IAM rights
 if os.environ.get("STORE_ENDPOINT"):
@@ -69,19 +69,11 @@ inp, out = f"{base}/in", f"{base}/out"
 fs = fsspec.filesystem("s3", **store)
 fs.pipe_file(f"{inp[5:]}/hello.txt", b"hello, cadmus")
 
-# 2. credentials for exactly these two prefixes, nothing else (revoked when the block ends)
+# 2. one call: credentials limited to exactly these two prefixes, the job, renewal while it runs, wait, the index, revoke
 client = Client(os.environ["PARSE_URL"], os.environ["PARSE_TOKEN"], store_options={k: v for k, v in store.items() if k == "endpoint_url"})
-grants = [(inp, "read"), (out, "write")]
-with mint(grants, options=store) as creds:
-    started = client.post(inp, out, creds)                                     # 202: the job runs
-    loop = renew_loop(client, grants, started.id, started.owner, creds, options=store)   # keeps the credentials alive for long jobs
-    try:
-        status = client.wait(out, lambda: loop.current[out])                   # reads status.json from the store
-        index = client.index(out, loop.current[out])                           # what came out of each input
-    finally:
-        loop.stop()
+status, index = client.run(inp, out, mint_options=store)
 
-print(status)                                                                  # {'status': 'done', ...}
+print(status)                                                       # {'status': 'done', ...}
 for name, entry in index["files"].items():
     print(name, entry["size"], list(entry["outputs"]))                         # hello.txt 13 ['parsed/hello.txt.md', ...]
 ```

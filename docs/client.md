@@ -2,7 +2,23 @@
 
 `pip install ./client` (`cadmus-parser`, import `cadmus_parser`; extras `[mint-s3]` = boto3, `[mint-gcs]` = google-auth). It does not depend on the service.
 
-## Posting a job and following it
+## The whole job: `Client.run`
+
+```python
+from cadmus_parser import Client
+
+client = Client("http://parser:8080", token, store_options={"endpoint_url": "http://store:9000"})   # your own non-secret store options
+status, index = client.run("s3://bucket/jobs/42/in", "s3://bucket/jobs/42/out", mint_options=my_store_identity,
+                           options={"files": {"base_url": "https://example.org/"}}, features={"ocr": "lan"})
+```
+
+It mints credentials limited to the input (read) and output (write) prefixes, posts the job, keeps the credentials renewed while it runs, waits, reads the index and revokes the
+credentials. `status` is `{"status": "done" | "failed", "error"?: ...}`; `index` is `{"files": {...}}` (see the [reference](reference.md)). It raises `ParseError` when the wrapper refuses,
+and whatever `mint` raises. Options: `grants=` a wider list than the default (a read grant for a whole project: each posted URL uses the grant that contains it), `lifetime`
+(900 s), `renew_every` (300 s), `poll_timeout` (12 min: set it above your largest `deadline_s`), `on_mint(handle)` called with every credential minted (for a registry of live ones).
+Everything below is what `run` is made of, for when you need the pieces.
+
+## Posting a job and following it (the pieces)
 
 ```python
 from cadmus_parser import Client, ParseError

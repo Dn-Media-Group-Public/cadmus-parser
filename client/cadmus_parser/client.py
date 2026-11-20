@@ -122,3 +122,39 @@ class Client:
             return json.loads(self.read(output_url, "index.json", options))
         except FileNotFoundError:
             return {"files": {}}
+
+
+    def run(self, input_url: str, output_url: str, grants: list | None = None, *, mint_options: dict | None = None, options: dict | None = None,
+            features: dict | None = None, lifetime: int = 900, renew_every: float = 300, poll_timeout: float = 12 * 60, on_mint=None) -> tuple[dict, dict]:
+        """The whole job: mint credentials limited to the input (read) and output (write) prefixes, post, keep the credentials renewed while it runs, wait,
+        read the index, revoke. Returns `(status, index)`: `status` is `{"status": "done" | "failed", "error"?: ...}`; raises ParseError when the wrapper
+        refuses and whatever `mint` raises. `mint_options` is your own identity for the store (see `mint`). A wider `grants` list (a read grant for
+        the whole project, say) replaces the default; each posted URL then uses the grant that contains it. `on_mint(handle)` sees every credential minted."""
+        from cadmus_parser.minting import mint
+        from cadmus_parser.renew import renew_loop
+        grants = grants or [(input_url, "read"), (output_url, "write")]
+        h = mint(grants, lifetime, mint_options)
+        if on_mint:
+            on_mint(h)
+        loop = None
+        try:
+            gi, go = _grant_for(h, input_url), _grant_for(h, output_url)
+            started = self.post(input_url, output_url, input_options=h[gi], output_options=h[go], options=options, features=features)
+            rekey = {g: u for g, u in ((gi, input_url), (go, output_url)) if g != u}
+            loop = renew_loop(self, grants, started.id, started.owner, h, interval=renew_every, lifetime=lifetime, options=mint_options, rekey=rekey, on_mint=on_mint)
+            status = self.wait(output_url, lambda: loop.current[go], poll_timeout)
+            return status, self.index(output_url, loop.current[go])
+        finally:
+            if loop:
+                loop.stop()
+            h.revoke()
+
+
+def _grant_for(grants: Mapping, url: str) -> str:
+    """The grant URL that covers `url`: the same, else the longest one it lies below."""
+    if url in grants:
+        return url
+    below = [g for g in grants if url.startswith(g.rstrip("/") + "/")]
+    if not below:
+        raise ValueError(f"no grant covers {url}")
+    return max(below, key=len)
