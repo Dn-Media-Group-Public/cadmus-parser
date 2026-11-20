@@ -1,6 +1,8 @@
-"""The parse of one job: every file under `original/` of the input tree is run through the one rule below, archives are unpacked
-(here, in the sandboxed process: members are parsed too, but never unpacked again) and every artefact goes to a `Sink`.
-No storage access, no network: the wrapper moves the bytes (docs/plans/parser-wrapper.md)."""
+"""The default `files` processor: markitdown, trafilatura, archive unpacking, binary decoders, file metadata, OCR. It sees one file at a time
+(`accepts` is true for everything, `process` writes through the sink) and has no storage access and no network: the wrapper moves the bytes.
+Options (`options["files"]` of the job request): `base_url` (resolves links of HTML inputs), `ctypes` ({input name: content type}).
+Archives are unpacked here, in the sandboxed process; the members go back through the worker with `ctx.recurse` (they are parsed, never
+unpacked again)."""
 
 import mimetypes
 import os
@@ -13,27 +15,18 @@ MAX_ARCHIVE_BYTES = int(os.environ.get("MAX_ARCHIVE_BYTES") or os.environ.get("M
 MAX_ARCHIVE_MEMBERS = int(os.environ.get("MAX_ARCHIVE_MEMBERS") or os.environ.get("MAX_ZIP_MEMBERS") or 50_000)
 
 
-class Sink:
-    """Where artefacts go. `rel` is a job-relative path (`parsed/…`, `original/<archive>.d/…`)."""
-
-    def put_bytes(self, rel: str, data: bytes, ctype: str) -> None: ...
-    def put_file(self, rel: str, src: str, ctype: str) -> None: ...  # moves `src` (a file in the work dir) into the output
-    def mark_text(self, rel: str) -> None: ...  # the manifest entry of `rel` is plain text the gateway may return inline
-    def note(self, text: str) -> None: ...
-
-
 def _ctype(name: str) -> str:
     return mimetypes.guess_type(name)[0] or "application/octet-stream"
 
 
-def _terse(sink: Sink, name: str, md: str) -> None:
+def _terse(sink, name: str, md: str) -> None:
     if t := extract.terse(md):
         sink.put_bytes(f"terse/{name}", t.encode(), "text/markdown")
 
 
-def _convert(sink: Sink, path: str, raw: bytes, ctype: str, base_url: str) -> None:
+def _convert(sink, path: str, raw: bytes, ctype: str, base_url: str) -> None:
     if path.lower().endswith((".md", ".markdown")):  # already Markdown: no parsed/, terse from the original
-        sink.mark_text(f"original/{path}")
+        sink.info(meta={"text": True})
         return _terse(sink, path, raw.decode("utf-8", errors="replace"))
     if bkind := extract.binary_kind(ctype, path, raw):
         try:
@@ -45,7 +38,7 @@ def _convert(sink: Sink, path: str, raw: bytes, ctype: str, base_url: str) -> No
         return
     is_html = "html" in ctype or path.lower().endswith((".html", ".htm"))
     if is_html and base_url:
-        raw = extract.absolutize(raw, base_url)  # parsed/ and simplified/ get absolute links; original/ is stored untouched
+        raw = extract.absolutize(raw, base_url)  # parsed/ and simplified/ get absolute links; the input is stored untouched
     try:
         text = extract.html_to_markdown(raw) if is_html else extract.file_to_markdown(raw, path)
     except Exception as e:  # noqa: BLE001  one unparseable file never fails the job
@@ -54,8 +47,8 @@ def _convert(sink: Sink, path: str, raw: bytes, ctype: str, base_url: str) -> No
     if not is_html:
         text = ocr.maybe_ocr(raw, path, ctype, text, sink.note)
     if not text.strip():
-        if not is_html and b"\0" not in raw[:1024]:  # ponytail: NUL sniff; text nobody converted is still returned inline from original/
-            sink.mark_text(f"original/{path}")
+        if not is_html and b"\0" not in raw[:1024]:  # ponytail: NUL sniff; text nobody converted is still returned inline from the input
+            sink.info(meta={"text": True})
         return
     sink.put_bytes(f"parsed/{path}.md", text.encode(), "text/markdown")
     if is_html and (simple := extract.html_to_simplified(raw)):
@@ -63,12 +56,13 @@ def _convert(sink: Sink, path: str, raw: bytes, ctype: str, base_url: str) -> No
     _terse(sink, f"{path}.md", text)
 
 
-def parse_file(sink: Sink, src: str, path: str, ctype: str, base_url: str = "", unzip: bool = True,
-               work: str = "/tmp") -> None:
-    """Parse `src` (the on-disk original `original/<path>`); an unpacked member goes to the sink as `original/<path>.d/…`."""
+def parse_file(sink, ctx, file, ctype: str, base_url: str = "") -> None:
+    """Parse the file; `file.rel` names the outputs (`parsed/<rel>.md`), an unpacked member goes back through `ctx.recurse`."""
+    path, src = file.rel, file.path
     size = os.path.getsize(src)
+    sink.info(content_type=ctype, **({"size": size} if file.depth else {}))
     meta_notes: list = []
-    meta = metadata.extract_metadata(src, ctype, path, meta_notes, tmp=work)  # before the size check: headers, not whole files
+    meta = metadata.extract_metadata(src, ctype, path, meta_notes, tmp=ctx.work)  # before the size check: headers, not whole files
     for n in meta_notes:
         sink.note(n)
     if meta:
@@ -78,12 +72,12 @@ def parse_file(sink: Sink, src: str, path: str, ctype: str, base_url: str = "", 
         sink.put_bytes(f"metadata/{path}.yaml", text.encode(), "application/yaml")
     if size > MAX_PARSE_BYTES:
         return sink.note(f"{path} not parsed ({size} bytes > MAX_PARSE_BYTES)")
-    if unzip and extract.archive_kind(ctype, path):
+    if not file.depth and not file.derived and extract.archive_kind(ctype, path):
         try:
             with open(src, "rb") as af:
                 members = extract.unpack_archive(af, path, ctype, MAX_ARCHIVE_MEMBERS, MAX_ARCHIVE_BYTES, [])
                 for name, f in members:
-                    _member(sink, f"{path}.d/{name}", f, base_url, work)
+                    _member(ctx, f, name, file)
             return
         except extract.ArchiveLimit as e:
             return sink.note(str(e))
@@ -93,25 +87,23 @@ def parse_file(sink: Sink, src: str, path: str, ctype: str, base_url: str = "", 
         _convert(sink, path, f.read(), ctype, base_url)
 
 
-def _member(sink: Sink, path: str, f, base_url: str, work: str) -> None:
-    """Stage a member in the work dir, parse it (no unpacking), then hand it to the sink as original/<path>."""
-    ctype = _ctype(path)
-    staged = os.path.join(work, "member" + os.path.splitext(path.lower())[1][:12])
+def _member(ctx, f, name: str, archive) -> None:
+    """Stage a member in the work dir and hand it back to the worker as a member of the archive."""
+    staged = os.path.join(ctx.work, "member" + os.path.splitext(name.lower())[1][:12])
     with open(staged, "wb") as d:
         shutil.copyfileobj(f, d)
-    parse_file(sink, staged, path, ctype, base_url, unzip=False, work=work)
-    sink.put_file(f"original/{path}", staged, ctype)
+    ctx.recurse(staged, name)
 
 
-def parse_job(sink: Sink, indir: str, job: dict, work: str) -> None:
-    """Everything under `<indir>/original/`. job: {base_url, ctypes: {path: content type}}.
-    A file inside `<x>.d/` next to an original `<x>` is a member from an earlier run: parsed, not unpacked again."""
-    root = os.path.join(indir, "original")
-    paths = sorted(os.path.relpath(os.path.join(d, n), root) for d, _, names in os.walk(root) for n in names)
-    ctypes = job.get("ctypes") or {}
-    for path in paths:
-        parts = path.split("/")
-        derived = any(parts[i].endswith(".d") and os.path.isfile(os.path.join(root, *parts[:i], parts[i][:-2]))
-                      for i in range(len(parts) - 1))
-        parse_file(sink, os.path.join(root, path), path, ctypes.get(path) or _ctype(path), job.get("base_url") or "",
-                   unzip=not derived, work=work)
+class Files:
+    name = "files"
+    top_dirs = ("original", "parsed", "simplified", "terse", "metadata")  # original/: unpacked archive members, `original/<archive>.d/…`
+
+    def accepts(self, file) -> bool:
+        return True
+
+    def process(self, sink, file, ctx) -> None:
+        ctype = (ctx.options.get("ctypes") or {}).get(file.rel) or _ctype(file.name if file.depth else file.rel)
+        parse_file(sink, ctx, file, ctype, ctx.options.get("base_url") or "")
+        if file.depth and os.path.exists(file.path):  # an archive member is also kept, as an output of its own entry
+            sink.put_file(f"original/{file.rel}", file.path, ctype)

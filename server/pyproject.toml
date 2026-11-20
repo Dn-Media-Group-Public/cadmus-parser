@@ -7,36 +7,19 @@ name = "cadmus-parser-server"
 version = "0.1.0"
 description = "cadmus-parser service side: the wrapper (storage <-> parser, uid pool), the worker and the default `files` processor"
 requires-python = ">=3.11"
-dependencies = [
-    "starlette",
-    "uvicorn[standard]",
-    "fsspec",
-    "trafilatura",
-    "markitdown[all]",
-    "python-multipart",
-    "lxml_html_clean",
-    "markdown-it-py",
-    "linkify-it-py",
-    "msgpack",
-    "cbor2",
-    "bson",
-    "py7zr",
-    "rarfile",
-    "blackboxprotobuf",
-    "pyyaml",
-    "rasterio",
-    "pyogrio",
-    "lxml",
-    "pypdf",
-    "pytesseract",
-    "pypdfium2",
-    "Pillow",
-]
+dependencies = ["starlette", "uvicorn[standard]", "fsspec"]
 
 [project.optional-dependencies]
 # the store the deployment uses (see sdk/pyproject.toml for why gcsfs is a separate pip step in the images)
 s3 = ["s3fs[boto3]>=2024.1"]
+gcs = ["gcsfs", "google-auth"]
+# the default `files` processor (markitdown, trafilatura, archives, decoders, metadata, OCR); without it no processor is installed
+files = ["trafilatura", "markitdown[all]", "python-multipart", "lxml_html_clean", "markdown-it-py", "linkify-it-py", "msgpack", "cbor2", "bson",
+         "py7zr", "rarfile", "blackboxprotobuf", "pyyaml", "rasterio", "pyogrio", "lxml", "pypdf", "pytesseract", "pypdfium2", "Pillow"]
 test = ["pytest", "httpx"]
+
+[project.entry-points."cadmus_parser.processors"]
+files = "cadmus_parser_server.parse:Files"
 
 [tool.setuptools.packages.find]
 include = ["cadmus_parser_server*"]

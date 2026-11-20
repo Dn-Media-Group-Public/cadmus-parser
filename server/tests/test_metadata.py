@@ -50,7 +50,7 @@ def test_office_revisions_comments_and_hostile_xml():
         z.writestr("word/document.xml", doc)
         z.writestr("word/comments.xml", f'<w:comments {W}><w:comment w:author="Ann" w:date="d"><w:p><w:r><w:t>hm</w:t></w:r></w:p></w:comment></w:comments>')
     meta, notes = extract("a.docx", b.getvalue())
-    o = meta["SpiderHoarder-Office"]
+    o = meta["Cadmus-Office"]
     assert not notes and o["RevisionCount"] == 2
     assert o["Revisions"][0] == {"Author": "Jane", "Date": "2024-03-01T10:12:00Z", "Type": "insert", "Text": "new"}
     assert o["Revisions"][1]["Type"] == "delete" and o["Comments"] == [{"Author": "Ann", "Date": "d", "Text": "hm"}]
@@ -61,7 +61,7 @@ def test_office_zip_bomb_is_refused_and_noted():
     assert not notes  # unused parts are never inflated
     big = f'<w:document {W}><w:body>' + "<w:p/>" * 3_000_000 + "</w:body></w:document>"
     meta, notes = extract("b.docx", docx(big))
-    assert any("office failed" in n for n in notes) and "SpiderHoarder-Office" not in meta
+    assert any("office failed" in n for n in notes) and "Cadmus-Office" not in meta
 
 
 def test_raster_vector():
@@ -73,11 +73,11 @@ def test_raster_vector():
                            transform=from_origin(500000, 6600000, 10, 10), nodata=0) as r:
             r.write(np.ones((4, 4), "uint8"), 1)
         meta, notes = extract("g.tif", open(f"{tmp}/g.tif", "rb").read())
-    g = meta["SpiderHoarder-Raster"]
+    g = meta["Cadmus-Raster"]
     assert not notes and g["CRS"]["EPSG"] == 25833 and g["BBox"] == [500000, 6599960, 500040, 6600000]
     assert 14 < g["BBoxWGS84"][0] < 16 and g["Size"] == {"Width": 4, "Height": 4} and g["NoData"] == [0.0]
     meta, notes = extract("p.geojson", GEOJSON)
-    v = meta["SpiderHoarder-Vector"]
+    v = meta["Cadmus-Vector"]
     assert not notes and v["BBox"] == [10.5, 59.9, 10.5, 59.9] and v["Layers"][0]["Features"] == 1
 
 
@@ -94,7 +94,7 @@ def test_pdf_incremental_update():
         w2.write(data)
         open(f"{tmp}/a.pdf", "wb").write(data.getvalue())
         meta, notes = extract("a.pdf", open(f"{tmp}/a.pdf", "rb").read(), "application/pdf")
-    p = meta["SpiderHoarder-PDF"]
+    p = meta["Cadmus-PDF"]
     assert not notes and p["IncrementalUpdates"] >= 1 and p["Creator"] == "C1"
 
 
@@ -129,14 +129,14 @@ def test_limits_contain_children(monkeypatch):
 
 def test_dump_truncates(monkeypatch):
     monkeypatch.setattr(metadata, "MAX_BYTES", 2000)
-    meta = {"File": {"FileType": "DOCX"}, "SpiderHoarder-Office": {"Revisions": [{"Author": "x" * 20, "Text": str(i)} for i in range(500)]}}
+    meta = {"File": {"FileType": "DOCX"}, "Cadmus-Office": {"Revisions": [{"Author": "x" * 20, "Text": str(i)} for i in range(500)]}}
     text, truncated = metadata.dump_yaml(meta)
-    assert truncated and len(text) <= 2000 and yaml.safe_load(text)["SpiderHoarder-Office"]["Truncated"] is True
+    assert truncated and len(text) <= 2000 and yaml.safe_load(text)["Cadmus-Office"]["Truncated"] is True
 
 
 def test_parse_writes_metadata_yaml(run, monkeypatch):
     s = run({"p.geojson": (GEOJSON, "application/geo+json")})
-    assert yaml.safe_load(s.files["metadata/p.geojson.yaml"])["SpiderHoarder-Vector"]["Layers"]
+    assert yaml.safe_load(s.files["metadata/p.geojson.yaml"])["Cadmus-Vector"]["Layers"]
     monkeypatch.setattr(parse, "MAX_PARSE_BYTES", 10)  # oversize: not parsed, still gets metadata
     s = run({"big.geojson": (GEOJSON, "application/geo+json")})
     assert "metadata/big.geojson.yaml" in s.files and "parsed/big.geojson.md" not in s.files and any("not parsed" in n for n in s.notes)
@@ -150,4 +150,4 @@ def test_parse_writes_metadata_yaml(run, monkeypatch):
     revs = "".join('<w:ins w:author="A" w:date="d"><w:r><w:t>t</w:t></w:r></w:ins>' for _ in range(100))
     s = run({"t.docx": docx(f"<w:p>{revs}</w:p>")})
     assert any("metadata truncated" in n for n in s.notes)
-    assert yaml.safe_load(s.files["metadata/t.docx.yaml"])["SpiderHoarder-Office"]["Truncated"] is True
+    assert yaml.safe_load(s.files["metadata/t.docx.yaml"])["Cadmus-Office"]["Truncated"] is True

@@ -4,27 +4,35 @@ import tempfile
 
 import pytest
 
-from cadmus_parser_server import parse
+from cadmus_parser_server import parse, worker
 
 
-class MemSink(parse.Sink):
-    """Collects what the parser would hand to the wrapper."""
+class MemSink(worker.Sink):
+    """Collects what the worker would hand to the wrapper, over all input files."""
 
     def __init__(self):
-        self.files, self.text, self.notes = {}, set(), []
+        self.files, self.text, self.notes, self.info_by = {}, set(), [], {}
 
-    def put_bytes(self, rel, data, ctype):
-        self.files[rel] = data
+    def for_file(self, address):
+        outer, rel = self, ".d/".join(address)
 
-    def put_file(self, rel, src, ctype):
-        self.files[rel] = open(src, "rb").read()
-        os.unlink(src)
+        class Per(worker.Sink):
+            def put_bytes(self, r, data, ctype, meta=None):
+                outer.files[r] = data
 
-    def mark_text(self, rel):
-        self.text.add(rel)
+            def put_file(self, r, src, ctype, meta=None):
+                outer.files[r] = open(src, "rb").read()
+                os.unlink(src)
 
-    def note(self, text):
-        self.notes.append(text)
+            def info(self, content_type=None, meta=None, size=None):
+                outer.info_by.setdefault(rel, {}).update(content_type=content_type, size=size)
+                if (meta or {}).get("text"):
+                    outer.text.add(f"original/{rel}")
+
+            def note(self, text):
+                outer.notes.append(text)
+
+        return Per()
 
 
 @pytest.fixture
@@ -39,11 +47,11 @@ def run():
         for name, v in files.items():
             data, ct = v if isinstance(v, tuple) else (v, "application/octet-stream")
             ctypes[name] = ct
-            os.makedirs(os.path.dirname(f"{d}/in/original/{name}"), exist_ok=True)
-            open(f"{d}/in/original/{name}", "wb").write(data)
+            os.makedirs(os.path.dirname(f"{d}/in/tree/{name}"), exist_ok=True)
+            open(f"{d}/in/tree/{name}", "wb").write(data)
         os.makedirs(f"{d}/work")
         sink = MemSink()
-        parse.parse_job(sink, f"{d}/in", {"base_url": base_url, "ctypes": ctypes}, f"{d}/work")
+        worker.Runner(sink, [parse.Files()], {"files": {"base_url": base_url, "ctypes": ctypes}}, [], f"{d}/work").run_tree(f"{d}/in/tree")
         return sink
 
     yield go
@@ -57,3 +65,17 @@ def _no_metadata(request, monkeypatch):
     if "metadata" not in request.keywords:
         from cadmus_parser_server import metadata
         monkeypatch.setattr(metadata, "extract_metadata", lambda *a, **k: {})
+
+
+@pytest.fixture
+def service():
+    from harness import Service
+    made = []
+
+    def make(**cfg):
+        made.append(Service(**cfg))
+        return made[-1]
+
+    yield make
+    for s in made:
+        s.stop()

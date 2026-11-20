@@ -1,6 +1,6 @@
 """File metadata (EXIF/GPS, Office revisions, GeoTIFF CRS, media streams, PDF history ...) as one YAML mapping per file.
 
-ExifTool's own groups come first; our extensions are further groups named `SpiderHoarder-<Format>`. Every extractor runs
+ExifTool's own groups come first; our extensions are further groups named `Cadmus-<Format>`. Every extractor runs
 in its own child process on a staged copy of the file (wall-clock timeout, memory/CPU/output limits, scrubbed environment; the parser container has no egress); a failing extractor is reported in `notes` and never fails the job.
 Python extractors are the functions below, run as `python -I -m cadmus_parser_server.metadata <extractor> <path>`."""
 
@@ -165,7 +165,7 @@ def _fps(rate):
 
 
 def _media(j):
-    """ffprobe JSON -> the SpiderHoarder-Media group."""
+    """ffprobe JSON -> the Cadmus-Media group."""
     fmt = j.get("format", {})
     streams = [{"Type": s.get("codec_type"), "Codec": s.get("codec_name"), "Bitrate": s.get("bit_rate"),
                 "Width": s.get("width"), "Height": s.get("height"),
@@ -248,9 +248,9 @@ def extract_metadata(path: str, ctype: str, name: str, notes: list, tmp: str | N
                 meta |= _exiftool(json.loads(_run(["exiftool", "-json", "-g1", "-struct", "-api", "LargeFileSupport=1", "--", path], tmp)))
             elif kind == "media":
                 probe = ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", "-show_chapters", "-protocol_whitelist", "file", path]
-                meta["SpiderHoarder-Media"] = _media(json.loads(_run(probe, tmp)))
+                meta["Cadmus-Media"] = _media(json.loads(_run(probe, tmp)))
             else:
-                group = "SpiderHoarder-" + {"raster": "Raster", "vector": "Vector", "office": "Office", "pdf": "PDF"}[kind]
+                group = "Cadmus-" + {"raster": "Raster", "vector": "Vector", "office": "Office", "pdf": "PDF"}[kind]
                 meta[group] = json.loads(_run([sys.executable, "-I", "-m", __name__, kind, path], tmp))
         except Exception as e:  # noqa: BLE001  never fails the job
             notes.append(f"{name}: metadata {kind} failed ({type(e).__name__})")
@@ -268,7 +268,7 @@ def dump_yaml(meta: dict) -> tuple:
     text, truncated = dump(), False
     while len(text.encode()) > MAX_BYTES:
         truncated = True
-        lists = [(g, k) for g, v in meta.items() if g.startswith("SpiderHoarder-") for k, x in v.items()
+        lists = [(g, k) for g, v in meta.items() if g.startswith("Cadmus-") for k, x in v.items()
                  if isinstance(x, list) and len(x) > 1]
         if lists:  # ponytail: longest by count, not bytes
             g, k = max(lists, key=lambda gk: len(meta[gk[0]][gk[1]]))
