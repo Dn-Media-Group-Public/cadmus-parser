@@ -226,4 +226,6 @@ def test_renew_rekey_may_name_both_posted_urls(svc):
     finally:
         hx.post = real
     assert seen == {s.input: {"k": 1}, s.output: {"k": 1}}
+    seen.clear()
+    assert s.client.renew(st.owner, st.id, {"g": {"k": 1}, "unused": {"k": 2}}, {"g": [s.output], "unused": []}) in (200, 410)  # an uncovered grant is dropped, not a 400
     s.client.wait(s.output)
