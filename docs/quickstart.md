@@ -32,15 +32,19 @@ upper = "toy.processor:Upper"
 
 ```sh
 git clone https://github.com/Dn-Media-Group-Public/cadmus-parser lib/cadmus-parser     # or: git submodule add ... lib/cadmus-parser
-docker build -f lib/cadmus-parser/server/Dockerfile -t cadmus-parser-base:local lib/cadmus-parser
 docker build -f lib/cadmus-parser/blob-sidecar/Dockerfile -t cadmus-parser-blob-sidecar:local lib/cadmus-parser
 ```
 
 ```dockerfile
 # parser/Dockerfile
-FROM cadmus-parser-base:local
+FROM debian:bookworm-slim
+ENV PATH=/venv/bin:$PATH
+ADD lib/cadmus-parser /cadmus
+RUN /cadmus/server/install.sh s3
 COPY toy/ /src/toy/
 RUN pip install --no-cache-dir /src/toy && chmod -R a+rX /venv
+VOLUME /scratch
+ENTRYPOINT ["tini", "--", "/cadmus/server/entrypoint.sh"]
 ```
 
 `docker build -t myorg-parser:local -f parser/Dockerfile .` (see [How to build a consumer image](consumer-image.md)).

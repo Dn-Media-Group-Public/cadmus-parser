@@ -23,7 +23,7 @@ Each resolves to a processor object (or a class, which is instantiated with no a
 | `accepts(file) -> bool` | cheap; may look at `file.name`, `file.size`, the first bytes |
 | `process(sink, file, ctx)` | do the work |
 
-Nothing the caller sends is imported, and the consumer does not select processors: the base image has none, and an image has whichever packages it installs. A
+Nothing the caller sends is imported, and the consumer does not select processors: an image has none unless it installs one, and has whichever packages it installs. A
 processor whose import fails (an extra that is not installed) is skipped with a line on the parser's stderr.
 
 ## The default processors

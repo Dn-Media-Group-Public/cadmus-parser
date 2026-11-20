@@ -53,7 +53,7 @@ The adversary is **the file, and so the parser** that reads it. The consumer (yo
 | `blob-sidecar/` | the authenticated egress proxy (squid) the wrapper reaches the store through; public internet only |
 | `ocr-sidecar/` | a forwarder to OpenAI-compatible OCR endpoints, one token per profile; the model for [your own sidecar](docs/sidecar-protocol.md) |
 | `docker-compose.parse.yml` | the swarm stack file: `parser`, `blob-sidecar`, networks and capabilities |
-| `server/Dockerfile` | the **base image** `cadmus-parser-base`: wrapper, Python, tini; no processor and no format tools |
+| `server/install.sh`, `server/Dockerfile` | what a consumer image runs after `ADD lib/cadmus-parser /cadmus` (see [consumer image](docs/consumer-image.md)); the Dockerfile is a ready-made image with no processor |
 
 ## Documentation
 
