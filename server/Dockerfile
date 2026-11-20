@@ -4,6 +4,7 @@
 #     FROM ${IMAGE_PREFIX}cadmus-parser-base:${IMAGE_TAG}
 #     RUN apt-get update && apt-get install -y --no-install-recommends libimage-exiftool-perl ffmpeg && rm -rf /var/lib/apt/lists/*
 #     RUN pip install --no-cache-dir "/opt/cadmus-parser/server[files]"     # the default `files` processor, or your own package
+#     RUN pip install --no-cache-dir "/opt/cadmus-parser/server[gcs]"       # GCS support, AFTER the processors: blackboxprotobuf pins a protobuf that gcsfs refuses, pip only warns
 # Build context: the repo root (docker build -f server/Dockerfile .). The source stays in /opt/cadmus-parser/server for that pip install.
 FROM debian:bookworm-slim
 ENV PATH=/venv/bin:$PATH
@@ -14,7 +15,7 @@ RUN apt-get update \
  && groupadd -g 900 wrapper && useradd -u 900 -g 900 --no-create-home --shell /usr/sbin/nologin wrapper \
  && mkdir /scratch && chown wrapper:wrapper /scratch
 COPY server/ /opt/cadmus-parser/server/
-RUN pip install --no-cache-dir "/opt/cadmus-parser/server[s3,gcs]" && chmod -R a+rX /venv /opt/cadmus-parser
+RUN pip install --no-cache-dir "/opt/cadmus-parser/server[s3]" && chmod -R a+rX /venv /opt/cadmus-parser
 # the scratch area is ephemeral: an anonymous volume of the task (never a named one), so a restart deletes what a crash left
 VOLUME /scratch
 COPY server/entrypoint.sh /app/entrypoint.sh
