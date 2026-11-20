@@ -1,6 +1,6 @@
 # Plan: Media decode
 
-> **Status: draft.** Depends on [processor-handoff](processor-handoff.md). Written for the article-graph consumer; general to cadmus. Open items are under "Open questions".
+> **Status: draft.** Depends on [processor-handoff](01-processor-handoff.md). Written for the article-graph consumer; general to cadmus. Open items are under "Open questions".
 
 ## Problem / Goal
 
@@ -39,7 +39,7 @@ source is decoded once; Python then post-processes the candidates. Pure extracti
 
 ### Frame store
 
-Storage is cheap, decoding is not: later per-frame analysis (OCR in [frame-ocr](frame-ocr.md), face detection in a consumer) reads these files instead of
+Storage is cheap, decoding is not: later per-frame analysis (OCR in [frame-ocr](06-frame-ocr.md), face detection in a consumer) reads these files instead of
 decoding the original.
 
 - Option `frame_passes`: list of `<resolution>@<fps>`; `resolution` is the output height in pixels or `full`, `fps` a number or `full`. Default
@@ -57,7 +57,7 @@ Operator-side numbers (deadline, memory, output size) stay in `PARSE_LIMITS`.
 
 ## Open questions
 
-1. **Handing artefacts to later processors in the same job** is solved in [processor-handoff](processor-handoff.md) (scratch is kept until the job ends, `ctx.dir()`); this plan only fixes the
+1. **Handing artefacts to later processors in the same job** is solved in [processor-handoff](01-processor-handoff.md) (scratch is kept until the job ends, `ctx.dir()`); this plan only fixes the
    names `media-decode` writes under its `ctx.dir()` (`audio.opus`, `keyframes/`, `keyframes.json`, `frames/`, `decode.json`).
 2. **Metadata completeness.** The `metadata` processor must provide, at least for the consumer's use: EXIF `DateTimeOriginal` with `OffsetTime`, GPS, image
    width/height, video/audio `creation_time`, an ISO 6709 location tag, duration, stream list. Verify during implementation; any missing field is added to
@@ -67,7 +67,7 @@ Operator-side numbers (deadline, memory, output size) stay in `PARSE_LIMITS`.
 
 ## Implementation order
 
-1. [processor-handoff](processor-handoff.md) implemented first.
+1. [processor-handoff](01-processor-handoff.md) implemented first.
 2. `media-decode` processor: probing and decisions (pure functions, unit-tested on small synthetic files made with ffmpeg), the single ffmpeg command builder,
    keyframe spacing and thinning (pure function with tests), renditions, frame store.
 3. Entry point, `files` extra, parser image (`ffmpeg`, `pillow-heif` are needed; ffmpeg is already installed).

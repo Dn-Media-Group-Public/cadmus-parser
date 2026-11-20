@@ -1,6 +1,6 @@
 # Plan: ASR (transcription)
 
-> **Status: draft.** Depends on [processor-handoff](processor-handoff.md), [media-decode](media-decode.md) and [sidecar-usage-reporting](sidecar-usage-reporting.md).
+> **Status: draft.** Depends on [processor-handoff](01-processor-handoff.md), [media-decode](02-media-decode.md) and [sidecar-usage-reporting](03-sidecar-usage-reporting.md).
 
 ## Problem / Goal
 
@@ -80,14 +80,14 @@ backend without diarization yields no speaker labels; speaker mapping across chu
 
 ## Open questions
 
-1. The worker mechanics this plan relies on, all specified in [processor-handoff](processor-handoff.md): the `Member` result of `ctx.recurse` (the merge reads each chunk's
+1. The worker mechanics this plan relies on, all specified in [processor-handoff](01-processor-handoff.md): the `Member` result of `ctx.recurse` (the merge reads each chunk's
    result from it), kept scratch files (`ctx.dir()`) for a salvaged attempt passed from `asr-primary`/`asr-fallback` to `asr-degrade`, and `ctx.recurse_many` for parallel chunk calls
    (24 chunks for a 2 h recording).
 2. A chunk file is an archive-member-shaped address: the 8-level and `MAX_ARCHIVE_MEMBERS` limits apply, which is fine for audio (hundreds of chunks).
 
 ## Implementation order
 
-1. [processor-handoff](processor-handoff.md) implemented first.
+1. [processor-handoff](01-processor-handoff.md) implemented first.
 2. `modelcheck.py` (validation helpers; tests on synthetic responses: truncation, repetition loop, backwards timestamps, block, empty).
 3. `asr-sidecar/` (profiles, both protocols, usage), tests with a fake upstream.
 4. Processors `asr-split` (cutting, merge, speaker mapping, rescale as pure functions with tests on synthetic chunk outputs), `asr-primary`, `asr-fallback`, `asr-degrade`.
@@ -98,7 +98,7 @@ backend without diarization yields no speaker labels; speaker mapping across chu
 | File | Change |
 |---|---|
 | `asr-sidecar/` (new: `app.py`, `Dockerfile`, `start.py`, tests) | sidecar |
-| `server/cadmus_parser_server/asr.py` (new), `modelcheck.py` (new, shared with [caption](caption.md)) | processors, validation |
+| `server/cadmus_parser_server/asr.py` (new), `modelcheck.py` (new, shared with [caption](05-caption.md)) | processors, validation |
 | `server/cadmus_parser_server/wrapper.py` | `FEATURES["asr"] = "ASR"`, `FEATURES["asr-fallback"] = "ASR_FALLBACK"` |
 | `server/cadmus_parser_server/overlay.py`, `docker-compose.parse.yml` | `--asr`, service, network |
 | `server/pyproject.toml` | four entry points |

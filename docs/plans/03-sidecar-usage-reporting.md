@@ -4,7 +4,7 @@
 
 ## Problem / Goal
 
-Sidecars that call paid model endpoints ([asr](asr.md), [caption](caption.md), and the existing OCR fallback) spend money on behalf of a job. A consumer wants
+Sidecars that call paid model endpoints ([asr](04-asr.md), [caption](05-caption.md), and the existing OCR fallback) spend money on behalf of a job. A consumer wants
 the per-attempt usage (model, outcome, tokens or audio seconds) to account for it. Everything a processor writes into `index.json` is untrusted (the parser may
 be hostile) and a `meta` object is capped at 2000 bytes, so usage cannot come from the processor. The sidecar is trusted and sees every call; the wrapper is
 trusted and writes `status.json`, which the parser cannot touch.

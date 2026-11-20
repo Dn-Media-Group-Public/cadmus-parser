@@ -4,8 +4,8 @@
 
 ## Problem / Goal
 
-The planned processors are not independent: [media-decode](media-decode.md) produces `audio.opus`, keyframes and frame files that [asr](asr.md), [caption](caption.md) and
-[frame-ocr](frame-ocr.md) consume; [asr](asr.md) and [caption](caption.md) split their input into chunk or window *files*, run a primary and a fallback processor on each
+The planned processors are not independent: [media-decode](02-media-decode.md) produces `audio.opus`, keyframes and frame files that [asr](04-asr.md), [caption](05-caption.md) and
+[frame-ocr](06-frame-ocr.md) consume; [asr](04-asr.md) and [caption](05-caption.md) split their input into chunk or window *files*, run a primary and a fallback processor on each
 and merge the results afterwards. The worker (`server/cadmus_parser_server/worker.py`) as it is gives most of this but not all of it:
 
 | Needed | Today (read from `worker.py`) |
@@ -74,7 +74,7 @@ the `claimed` flags per member (no shared mutable state), one `write` per protoc
 1. `put_file` keeps the source (hard link with the group fix, copy fallback); audit (open question 1); tests that a kept file stays readable by a later processor, is uploaded once, and is wiped at job end.
 2. `ctx.dir()`; `Member`, the `recurse` return value and `synthetic=True` (no index entry, outputs and notes attached to the real ancestor, `MAX_SYNTHETIC_MEMBERS`); tests with a fake chain, including that the index lists no chunk entries.
 3. `recurse_many` with `threadsafe`, locking, limits; tests (order, one failing member, deadline).
-4. Docs. Then [media-decode](media-decode.md) and the model plans build on it.
+4. Docs. Then [media-decode](02-media-decode.md) and the model plans build on it.
 
 ## Files to change
 

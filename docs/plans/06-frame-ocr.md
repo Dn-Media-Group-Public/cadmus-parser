@@ -1,11 +1,11 @@
 # Plan: Frame OCR
 
-> **Status: draft.** Depends on [processor-handoff](processor-handoff.md) and [media-decode](media-decode.md).
+> **Status: draft.** Depends on [processor-handoff](01-processor-handoff.md) and [media-decode](02-media-decode.md).
 
 ## Problem / Goal
 
 Cadmus OCRs images and scanned PDF pages (Tesseract first, a remote multimodal model through `ocr-sidecar` as fallback) but not the frames of a video. Text in
-video (signs, lower-thirds, slides, documents on screen) is lost. [media-decode](media-decode.md) writes frame files cheap to read, which is what this plan consumes.
+video (signs, lower-thirds, slides, documents on screen) is lost. [media-decode](02-media-decode.md) writes frame files cheap to read, which is what this plan consumes.
 
 Goal: a `frame-ocr` processor that runs the existing OCR engine over a video's frames and writes timestamped text.
 
@@ -21,7 +21,7 @@ Goal: a `frame-ocr` processor that runs the existing OCR engine over a video's f
 - **Output** `frame-ocr/<file.rel>/ocr.json`: `[{"t_start": 12.0, "t_end": 18.0, "text": "...", "conf": 71, "engine": "tesseract|remote"}]`, plus a note when the frame
   cap (`max_frames`, default 5000) was reached.
 - Per-frame Tesseract uses the OCR settings that exist today (`OCR_LANGS`, `OCR_MIN_CONF`, `OCR_MIN_CHARS`, ...); the remote fallback goes through `ocr-sidecar` and so
-  through [sidecar-usage-reporting](sidecar-usage-reporting.md) once the OCR sidecar adopts it.
+  through [sidecar-usage-reporting](03-sidecar-usage-reporting.md) once the OCR sidecar adopts it.
 
 ## Open questions
 
