@@ -26,6 +26,13 @@ Each resolves to a processor object (or a class, which is instantiated with no a
 Nothing the caller sends is imported, and the consumer does not select processors: the base image has none, and an image has whichever packages it installs. A
 processor whose import fails (an extra that is not installed) is skipped with a line on the parser's stderr.
 
+## The default processors
+
+The `files` extra installs nine, one per kind of file or library: `metadata` (ExifTool, ffprobe, GDAL, OOXML, PDF history), `sizecap`, `archives`, `markdown`, `binary`
+(msgpack, CBOR, BSON, plist, protobuf), `html` (trafilatura), `apk`, `documents` (markitdown and OCR, the fallback) and `members` (keeps unpacked archive members). They
+share the options entry `files` (`base_url`, `ctypes`, read with `ctx.options_of("files")`) and use `before`/`after` and `ctx.claim()` to hand a file to exactly one
+content handler. They are the model for splitting your own.
+
 ## Order and dispatch
 
 The worker sorts the processors topologically at the start of every job; free choices are broken alphabetically by name, so the order is the same on every run.

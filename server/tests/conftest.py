@@ -4,7 +4,7 @@ import tempfile
 
 import pytest
 
-from cadmus_parser_server import parse, worker
+from cadmus_parser_server import parse, processors, worker
 
 
 class MemSink(worker.Sink):
@@ -51,7 +51,7 @@ def run():
             open(f"{d}/in/tree/{name}", "wb").write(data)
         os.makedirs(f"{d}/work")
         sink = MemSink()
-        worker.Runner(sink, [parse.Files()], {"files": {"base_url": base_url, "ctypes": ctypes}}, [], f"{d}/work").run_tree(f"{d}/in/tree")
+        worker.Runner(sink, processors.order([c() for c in parse.PROCESSORS]), {"files": {"base_url": base_url, "ctypes": ctypes}}, [], f"{d}/work").run_tree(f"{d}/in/tree")
         return sink
 
     yield go

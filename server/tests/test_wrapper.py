@@ -391,12 +391,16 @@ def test_limits_follow_the_classes_present(service):
     assert json.loads(j.index()["notes"])["as"] == -1  # RLIM_INFINITY
 
 
-def test_a_processor_cycle_fails_the_job_with_the_reason(service, monkeypatch, tmp_path):
+def test_a_processor_cycle_fails_the_job_with_the_reason(service, monkeypatch):
     """The real worker with two installed processors that want each other first: the error is in status.json."""
-    from cadmus_parser_server import processors
+    import pathlib
+    import tempfile
+    tmp_path = pathlib.Path(tempfile.mkdtemp())
+    tmp_path.chmod(0o755)  # the pool uid must be able to import it
     mod = tmp_path / "cycmod.py"
     mod.write_text("class A:\n name='a'; after=['b']; top_dirs=('parsed',)\n def accepts(s,f): return True\n def process(s,k,c): pass\n"
                    "class B:\n name='b'; after=['a']; top_dirs=('parsed',)\n def accepts(s,f): return True\n def process(s,k,c): pass\n")
+    mod.chmod(0o644)
     s = service(parser_cmd=script(f"sys.path.insert(0, {str(tmp_path)!r})\nimport cycmod\nfrom cadmus_parser_server import processors, worker\n"
                                   "processors.load = lambda: [cycmod.A(), cycmod.B()]\nworker.main(jobdir)"))
     j = s.job({"a.md": b"# a"})

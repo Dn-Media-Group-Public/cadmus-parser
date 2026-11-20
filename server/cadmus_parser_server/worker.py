@@ -114,6 +114,10 @@ class Ctx:
         self.options = runner.options.get(proc.name) or {}
         self.features, self.work = runner.features, runner.work
 
+    def options_of(self, name: str) -> dict:
+        """The job's options for another name: a family of processors may share one entry (the default ones read `files`)."""
+        return self._r.options.get(name) or {}
+
     def claim(self) -> None:
         self._f.claimed = True
 

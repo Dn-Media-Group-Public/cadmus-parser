@@ -50,10 +50,14 @@ class Job:
         return open(f"{self.root}/out/{name}", "rb").read()
 
     def status(self):
-        try:
-            return json.loads(self.read("status.json"))
-        except FileNotFoundError:
-            return None
+        for _ in range(50):
+            try:
+                return json.loads(self.read("status.json"))
+            except FileNotFoundError:
+                return None
+            except ValueError:  # a local file is not written atomically, an object store's object is
+                time.sleep(0.01)
+        raise AssertionError("status.json is not JSON")
 
     def index(self):
         return json.loads(self.read("index.json"))

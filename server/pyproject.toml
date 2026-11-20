@@ -19,7 +19,15 @@ files = ["trafilatura", "markitdown[all]", "python-multipart", "lxml_html_clean"
 test = ["pytest", "httpx"]
 
 [project.entry-points."cadmus_parser.processors"]
-files = "cadmus_parser_server.parse:Files"
+metadata = "cadmus_parser_server.parse:Metadata"
+sizecap = "cadmus_parser_server.parse:SizeCap"
+archives = "cadmus_parser_server.parse:Archives"
+markdown = "cadmus_parser_server.parse:Markdown"
+binary = "cadmus_parser_server.parse:Binary"
+apk = "cadmus_parser_server.parse:Apk"
+html = "cadmus_parser_server.parse:Html"
+documents = "cadmus_parser_server.parse:Documents"
+members = "cadmus_parser_server.parse:Members"
 
 [tool.setuptools.packages.find]
 include = ["cadmus_parser_server*"]
