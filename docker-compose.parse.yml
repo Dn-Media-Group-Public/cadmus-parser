@@ -1,4 +1,4 @@
-# The parser service as a library (docs/stack-file.md): what interprets an untrusted file runs here, not in the consumer. `parser` = the wrapper
+# The parser service as a library (docs/reference.md): what interprets an untrusted file runs here, not in the consumer. `parser` = the wrapper
 # (storage <-> parser, holds the tokens) plus sandboxed parser processes on pool uids that can read nothing, reach nothing and authenticate to
 # nothing; `blob-sidecar` = the authenticated egress proxy the wrapper reaches the store through (the parser has no route out: its networks are
 # internal). Deploy with `docker stack deploy -c docker-compose.parse.yml -c <overlay> ...`; `python -m cadmus_parser_server.overlay` writes
