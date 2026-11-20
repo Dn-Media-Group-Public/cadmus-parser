@@ -36,6 +36,8 @@ index = client.index("s3://bucket/jobs/42/out", creds["s3://bucket/jobs/42/out"]
   heartbeat rule (`running` older than 30 s reads as `failed`, "wrapper lost"); `wait` polls with backoff (50 ms to 1 s) and returns `{"status": "done" | "failed",
   "error"?}`; a `poll_timeout` that is too short for the longest class reads as failed. The `options` of `read`, `status`, `wait` and `index` may be a callable
   returning the current options (use it with a renewed credential).
+- When the job used a sidecar that reports usage, the final `status.json` has `usage` (per-attempt model, outcome, tokens or audio seconds): read it from the
+  output base after `wait`; see [reference](reference.md#statusjson-and-indexjson). See also: [Plan: sidecar usage reporting](implemented-plans/03-sidecar-usage-reporting.md)
 - `input_options=` / `output_options=` replace the lookup in `creds` when a grant is wider than a posted URL (a read grant for a whole project, a posted input of one job).
   Nothing is filtered: build URLs and options from your own state, never from untrusted input.
 

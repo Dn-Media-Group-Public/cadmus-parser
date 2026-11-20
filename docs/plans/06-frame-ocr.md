@@ -21,7 +21,7 @@ Goal: a `frame-ocr` processor that runs the existing OCR engine over a video's f
 - **Output** `frame-ocr/<file.rel>/ocr.json`: `[{"t_start": 12.0, "t_end": 18.0, "text": "...", "conf": 71, "engine": "tesseract|remote"}]`, plus a note when the frame
   cap (`max_frames`, default 5000) was reached.
 - Per-frame Tesseract uses the OCR settings that exist today (`OCR_LANGS`, `OCR_MIN_CONF`, `OCR_MIN_CHARS`, ...); the remote fallback goes through `ocr-sidecar` and so
-  through [sidecar-usage-reporting](03-sidecar-usage-reporting.md) once the OCR sidecar adopts it.
+  through [sidecar-usage-reporting](../implemented-plans/03-sidecar-usage-reporting.md) once the OCR sidecar adopts it.
 
 ## Open questions
 

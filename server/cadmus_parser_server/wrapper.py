@@ -29,6 +29,7 @@ import sys
 import threading
 import time
 import traceback
+import urllib.request
 
 import fsspec
 from starlette.applications import Starlette
@@ -49,6 +50,14 @@ MAX_META = 2000  # bytes of one entry's `meta`, as JSON
 # the operator settings the parser process enforces (no secret): the only part of the wrapper's own environment a parser gets; PARSE_PASS_ENV adds names
 PARSER_ENV = ("MAX_PARSE_BYTES", "MAX_ARCHIVE_BYTES", "MAX_ARCHIVE_MEMBERS", "PARSE_MEMBER_WORKERS", "MAX_SYNTHETIC_MEMBERS", "METADATA_TIMEOUT", "METADATA_MAX_MEM", "METADATA_MAX_BYTES", "OCR_TIMEOUT",
               "OCR_LANGS", "OCR_MIN_CONF", "OCR_MIN_CHARS", "OCR_DPI", "OCR_MAX_PAGES", "OCR_MAX_SIDE", "OCR_TESSERACT_TIMEOUT")
+
+
+def sidecar_call(p: dict, method: str, path: str, body: dict | None = None) -> dict:
+    """One admin call to a sidecar (docs/sidecar-protocol.md, "Usage reporting"), authenticated by the profile's `admin_token`."""
+    req = urllib.request.Request(p["url"].rstrip("/") + path, method=method, data=json.dumps(body).encode() if body is not None else None,
+                                 headers={"Authorization": f"Bearer {p['admin_token']}", "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=10) as r:  # noqa: S310  the operator's own sidecar URL
+        return json.loads(r.read())
 
 
 class ProtocolError(Exception):
@@ -76,7 +85,7 @@ class Config:
     def __init__(self, token: str, blob_options: dict | None = None, profiles: dict | None = None, scratch: str = "/scratch", uid_base: int = 20000,
                  pool_size: int = 4, replica: str = "wrapper", limits: dict | None = None, max_records: int = 500_000, max_notes: int = 1000,
                  max_entries: int = 50_000, parser_cmd: list | None = None, heartbeat: float = HEARTBEAT, top_dirs=None, tracebacks: bool = False,
-                 pass_env: tuple = PARSER_ENV):
+                 pass_env: tuple = PARSER_ENV, max_usage_calls: int = 20000):
         """`profiles`: {feature: {profile: {url, token}}}. `limits_`: PARSE_LIMITS (lm.resolve). `top_dirs`: default = what the processors declare."""
         self.token, self.blob_options, self.profiles = token, blob_options or {}, profiles or {}
         self.scratch, self.uid_base, self.pool_size, self.replica = scratch, uid_base, pool_size, replica
@@ -84,6 +93,7 @@ class Config:
         self.max_records, self.max_notes, self.max_entries = max_records, max_notes, max_entries
         self.parser_cmd = parser_cmd or [sys.executable, "-I", "-u", "-m", "cadmus_parser_server.worker"]
         self.heartbeat, self.tracebacks, self.pass_env = heartbeat, tracebacks, pass_env
+        self.max_usage_calls = max_usage_calls
         self.top_dirs = set(top_dirs) if top_dirs is not None else None
 
     @classmethod
@@ -93,7 +103,8 @@ class Config:
                    {f: json.loads(e.get(f"{p}_PROFILES") or "{}") for f, p in FEATURES.items()}, e.get("PARSE_SCRATCH", "/scratch"),
                    env_int("PARSE_UID_BASE", 20000), env_int("PARSE_POOL_SIZE", 4), e.get("REPLICA_ID") or e.get("HOSTNAME") or "wrapper",
                    json.loads(e.get("PARSE_LIMITS") or "{}"), max_entries=env_int("MAX_ARCHIVE_MEMBERS", 50_000),
-                   tracebacks=e.get("PARSE_TRACEBACKS") == "1", pass_env=(*PARSER_ENV, *e.get("PARSE_PASS_ENV", "").split()))
+                   tracebacks=e.get("PARSE_TRACEBACKS") == "1", pass_env=(*PARSER_ENV, *e.get("PARSE_PASS_ENV", "").split()),
+                   max_usage_calls=env_int("PARSE_USAGE_MAX_CALLS", 20000))
 
 
 # ---- the uid pool ---------------------------------------------------------------------------------------------
@@ -299,6 +310,8 @@ class Job:
         self.output = Side(w, body["output"]["url"], body["output"].get("options") or {})
         self.key = body["output"]["url"].rstrip("/")  # the job's identity
         self.timed_out, self.total, self.notes, self.paths, self.worker_error = False, 0, [], set(), None
+        self.reg_errors: list = []
+        self.tokens: dict = {}  # feature -> job token, for sidecars that report usage
 
     # -- status --
     def write_json(self, name: str, obj) -> None:
@@ -306,12 +319,39 @@ class Job:
         with fs.open(f"{base.rstrip('/')}/{name}", "wb") as f:
             f.write(json.dumps(obj).encode())
 
-    def status(self, status: str, error: str | None = None, tb: str | None = None) -> None:
+    def status(self, status: str, error: str | None = None, tb: str | None = None, usage: dict | None = None) -> None:
         s = {"status": status, "owner_replica": self.w.cfg.replica, "updated": time.time(), **({"error": error} if error else {}),
              **({"traceback": tb} if error and tb and self.w.cfg.tracebacks else {})}
         self.w.remember(self.key, s)
         with contextlib.suppress(Exception):  # a heartbeat that cannot be written must not kill the parse
-            self.write_json("status.json", s)
+            self.write_json("status.json", {**s, "usage": usage} if usage else s)  # usage is not remembered: it can be big
+
+    # -- usage reporting: the parser gets a job token, the sidecar records against it, the wrapper reads the record --
+    def register(self, lim: dict) -> None:
+        ttl = (lim["deadline_s"] or 3600) + 300
+        for feature, profile in (self.req.get("features") or {}).items():
+            p = self.w.cfg.profiles[feature][profile]
+            if p.get("admin_token"):
+                try:
+                    self.tokens[feature] = sidecar_call(p, "POST", "/admin/jobs", {"job": self.id, "profile": profile, "ttl": ttl})["token"]
+                except Exception as e:  # noqa: BLE001  no usage for this feature; the parser keeps the profile token and the job runs
+                    log.warning("could not register job %s with %s: %s", self.key, feature, e)
+                    self.reg_errors.append(f"{feature}: {type(e).__name__}")
+
+    def collect(self) -> dict | None:
+        calls, truncated, errors, cap = [], False, list(self.reg_errors), self.w.cfg.max_usage_calls
+        for feature in self.tokens:
+            p = self.w.cfg.profiles[feature][self.req["features"][feature]]
+            try:
+                r = sidecar_call(p, "GET", f"/admin/jobs/{self.id}/usage")
+                calls += r["calls"]
+                truncated |= bool(r.get("truncated"))
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"{feature}: {type(e).__name__}")
+        if not self.tokens and not errors:
+            return None
+        calls.sort(key=lambda c: c.get("t", 0))
+        return {"calls": calls[:cap], "truncated": truncated or len(calls) > cap, **({"error": "; ".join(errors)} if errors else {})}
 
     # -- steps --
     def listing(self) -> dict:
@@ -357,7 +397,7 @@ class Job:
         env |= {k: os.environ[k] for k in cfg.pass_env if os.environ.get(k)}
         for feature, profile in (self.req.get("features") or {}).items():  # only the requested profile: a job never holds another's token
             p, prefix = cfg.profiles[feature][profile], FEATURES[feature]
-            env |= {f"{prefix}_URL": p["url"], f"{prefix}_TOKEN": p["token"]}
+            env |= {f"{prefix}_URL": p["url"], f"{prefix}_TOKEN": self.tokens.get(feature, p["token"])}
         return env
 
     def launch(self, jobdir: str, uid: int, lim: dict) -> subprocess.Popen:
@@ -462,7 +502,7 @@ class Job:
         """index.json first (artefacts already uploaded stay), then status.json."""
         index = {"files": self.index.files, **({"notes": "\n".join(self.index.notes)} if self.index.notes else {})}
         self.write_json("index.json", index)
-        self.status("failed" if error else "done", error, tb)
+        self.status("failed" if error else "done", error, tb, self.collect())
 
     def run(self) -> None:
         w, error, tb, proc = self.w, None, None, None
@@ -496,6 +536,7 @@ class Job:
                 os.chmod(out, 0o2770)
                 for n in reversed(paths):
                     os.lchown(n, uid, os.getegid() if n in (jobdir, out) else uid)
+            self.register(lim)
             proc = self.launch(jobdir, uid, lim)
             threading.Thread(target=drain_stderr, args=(proc,), daemon=True).start()
 

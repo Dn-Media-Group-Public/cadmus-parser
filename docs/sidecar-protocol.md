@@ -22,10 +22,23 @@ Plain HTTP, bytes in and bytes out.
   profile: what the sidecar does and which profile it uses is controlled by the token and the file.
 - **The response** body is the result bytes, with its own `Content-Type` and, where relevant, `Content-Disposition`, both set by the sidecar.
 - **`GET /health`**: `200 {"ok": true}`, no authentication.
-- No other methods or routes.
+- No other methods or routes (except the optional admin routes below).
 
 **A sidecar is not a proxy.** It forwards no request header, ever. It reads the headers it needs and builds what it sends upstream itself. It takes no URL and no
 path from the request and has no store access.
+
+## Usage reporting (optional)
+
+A sidecar that spends money on behalf of a job can report it. With an `ADMIN_TOKEN` configured it adds admin routes, authenticated by `Authorization: Bearer
+<ADMIN_TOKEN>` (known to the wrapper only, never the parser):
+
+- `POST /admin/jobs` `{"job", "profile", "ttl"?}` -> `{"token"}`: a fresh job token that selects the same profile as the profile token and is tied to the job.
+  The wrapper gives the parser this token in `<FEATURE>_TOKEN`; the sidecar attributes each call carrying it to the job. A job id in a header is never trusted.
+- `GET /admin/jobs/<id>/usage` -> `{"calls": [...], "truncated": bool}`, and drops the record and the token. `DELETE /admin/jobs/<id>` drops without reading.
+- Job tokens expire after `ttl` seconds (the wrapper sends the job's deadline plus a margin).
+
+Record format and `status.json`: see the [reference](reference.md#statusjson-and-indexjson). `common/usage.py` implements all of it; the `ocr-sidecar` uses it.
+See also: [Plan: sidecar usage reporting](implemented-plans/03-sidecar-usage-reporting.md)
 
 ## Errors and limits
 

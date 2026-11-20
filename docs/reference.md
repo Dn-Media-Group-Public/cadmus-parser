@@ -44,8 +44,14 @@ when its current credential expires.
 Written under the output base; `index.json` first, then `status.json`. Never listed inside the index.
 
 ```json
-{"status": "running" | "done" | "failed", "owner_replica": "...", "updated": 1700000000.0, "error"?: "...", "traceback"?: "..."}
+{"status": "running" | "done" | "failed", "owner_replica": "...", "updated": 1700000000.0, "error"?: "...", "traceback"?: "...", "usage"?: {"calls": [...], "truncated": false, "error"?: "..."}}
 ```
+
+`usage` is written once the job ends (done or failed), only if the job asked for a feature whose sidecar reports usage (`admin_token` in its `<PREFIX>_PROFILES`
+entry). One record per upstream attempt, written by the trusted sidecar, never the processor: `{"feature", "profile", "model", "outcome": "ok" | "error" (a sidecar
+may also use "invalid" | "blocked"), "unit": "tokens" | "audio_seconds", "input", "output", "t"}`. At most `PARSE_USAGE_MAX_CALLS` records are kept (first ones),
+then `truncated` is true. `error` means a sidecar could not be reached to register or collect: the job result is unaffected and the records of that feature are missing.
+See also: [Plan: sidecar usage reporting](implemented-plans/03-sidecar-usage-reporting.md)
 
 `running` is rewritten every 10 s; a `running` older than 30 s means the wrapper is lost (the client library applies the rule: `Client.status`).
 
@@ -106,6 +112,9 @@ network `<client>-parse` per client service that only that client and the parser
 | `PARSE_PROXY_ALLOW` | blob-sidecar | `host:port` exceptions to "public internet only" |
 | `PARSE_BLOB_OPTIONS` | parser | JSON fsspec options merged under every credential (endpoint ...); **no secrets** |
 | `OCR_PROFILES` | parser | JSON `{profile: {url, token}}`: the sidecar to use and its token; the parser gets only the requested profile's. (The ocr-sidecar's own `OCR_PROFILES` is a different table.) |
+| `<PREFIX>_PROFILES[...].admin_token` | parser | optional, per profile entry: the sidecar's `<PREFIX>_ADMIN_TOKEN`; enables usage reporting for that sidecar (never reaches the parser) |
+| `PARSE_USAGE_MAX_CALLS` | parser, sidecars | most usage records kept per job (default 20000) |
+| `OCR_ADMIN_TOKEN` | ocr-sidecar | enables the admin routes for usage reporting |
 | `PARSE_POOL_SIZE` | parser | parsers per replica (default 4); a full replica answers 503 |
 | `PARSE_UID_BASE` | parser | first pool uid (default 20000) |
 | `PARSE_SCRATCH` | parser | scratch area (default `/scratch`; an anonymous volume) |

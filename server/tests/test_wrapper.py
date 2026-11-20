@@ -489,3 +489,33 @@ def test_hostile_media_and_raster_files_open_no_connection(service):
         raise AssertionError("a parser opened a connection to a URL from an untrusted file")
     except socket.timeout:
         pass
+
+
+def test_usage_is_registered_collected_and_written_to_status(service, monkeypatch):
+    calls = []
+
+    def fake(p, method, path, body=None):
+        calls.append((p["url"], method, path, body))
+        if method == "POST":
+            return {"token": "job-tok"}
+        if p["url"] == "http://ocr-lan":
+            return {"calls": [{"t": 2, "model": "m"}, {"t": 1, "model": "m"}, {"t": 3, "model": "m"}], "truncated": False}
+        raise OSError("down")
+    monkeypatch.setattr(wrapper, "sidecar_call", fake)
+    profiles = {"ocr": {"lan": {"url": "http://ocr-lan", "token": "tok-lan", "admin_token": "adm"}, "remote": {"url": "http://ocr-remote", "token": "tok-remote"}}}
+    s = service(profiles=profiles, max_usage_calls=2,
+                parser_cmd=hostile("os.write(1, json.dumps({'note': os.environ['OCR_TOKEN']}).encode() + b'\\n')"))
+    j = s.job({"a.md": b"# a"})
+    j.post(features={"ocr": "lan"})
+    st = j.wait()
+    assert j.index()["notes"] == "job-tok"  # the parser holds the job token, not the profile token
+    assert calls[0][1:3] == ("POST", "/admin/jobs") and calls[0][3]["job"] and calls[0][3]["profile"] == "lan"
+    assert st["usage"] == {"calls": [{"t": 1, "model": "m"}, {"t": 2, "model": "m"}], "truncated": True}
+    j = s.job({"a.md": b"# a"})  # a profile without admin_token: unchanged, no usage field
+    j.post(features={"ocr": "remote"})
+    assert "usage" not in j.wait() and j.index()["notes"] == "tok-remote"
+    monkeypatch.setattr(wrapper, "sidecar_call", lambda *a, **k: (_ for _ in ()).throw(OSError("down")))
+    j = s.job({"a.md": b"# a"})  # sidecar down: the job still succeeds and says so
+    j.post(features={"ocr": "lan"})
+    st = j.wait()
+    assert st["status"] == "done" and st["usage"]["error"] == "ocr: OSError" and st["usage"]["calls"] == []

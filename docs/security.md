@@ -15,6 +15,13 @@ The **parser** (the process that reads untrusted bytes) is confined to **one rea
   reserved, so a parser cannot write them;
 - after every job the uid's processes are killed and everything it owned is removed and verified; a slot that cannot be cleaned is quarantined, never reused.
 
+## Why usage is trusted
+
+Anything a processor writes into `index.json` is untrusted. `usage` in `status.json` comes from the sidecar (which sees every call) and is written by the wrapper,
+neither of which the parser can touch. The parser cannot name the job: it holds a **job token** the wrapper obtained over the sidecar's admin routes
+(`ADMIN_TOKEN`, known to the wrapper only), so a header it sends attributes nothing. Job tokens expire.
+See also: [Plan: sidecar usage reporting](implemented-plans/03-sidecar-usage-reporting.md)
+
 ## What the client must do
 
 The client is **trusted**: it chooses the two base URLs and the credentials, and the wrapper uses them as given. There is no base-URL allow-list, no scheme

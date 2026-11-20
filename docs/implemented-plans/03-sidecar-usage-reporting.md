@@ -1,6 +1,6 @@
 # Plan: Sidecar usage reporting
 
-> **Status: draft.** The design below is a proposal; "Open questions" need a decision.
+> **Status: implemented.** Admin-route registration (`POST /admin/jobs`) takes an optional `ttl`; the sidecar also caps records at `PARSE_USAGE_MAX_CALLS` and reports `truncated`. The `ocr-sidecar` reports usage (open question 2: yes).
 
 ## Problem / Goal
 

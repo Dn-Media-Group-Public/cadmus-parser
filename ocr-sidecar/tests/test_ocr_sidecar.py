@@ -74,3 +74,44 @@ def test_egress_is_pinned_to_the_profile_endpoints():
     assert flat.index(f"iptables -A OUTPUT {own} -d 169.254.169.254 -p tcp --dport 80 -j ACCEPT") < flat.index(f"iptables -A OUTPUT {own} -j REJECT")
     assert flat[-2:] == [f"iptables -A OUTPUT {own} -j REJECT", f"ip6tables -A OUTPUT {own} -j REJECT"]
     assert not any("169.254" in " ".join(c) for c in egress_rules.pinned_rules(7, [], egress_rules.endpoints(PROFILES, lambda h: h)))
+
+
+def test_job_token_attributes_usage_and_a_forged_id_does_nothing():
+    clock = [1000.0]
+    seen = []
+
+    def upstream(request):
+        seen.append(request)
+        return httpx.Response(200, json={"choices": [{"message": {"content": "t"}}], "usage": {"prompt_tokens": 5, "completion_tokens": 2}})
+    app = sidecar.make_app(PROFILES, transport=httpx.MockTransport(upstream), admin_token="adm", max_calls=2)
+    c = TestClient(app)
+    adm = {"Authorization": "Bearer adm"}
+    assert c.post("/admin/jobs", json={"job": "j1", "profile": "lan"}).status_code == 401  # the profile token is no admin token
+    assert c.post("/admin/jobs", json={"job": "j1", "profile": "lan"}, headers={"Authorization": "Bearer tl"}).status_code == 401
+    jt = c.post("/admin/jobs", json={"job": "j1", "profile": "lan"}, headers=adm).json()["token"]
+    h = {"Content-Type": "image/png"}
+    for _ in range(3):  # the job token selects the profile; the third call is past max_calls
+        assert c.post("/process", content=PNG, headers={**h, "Authorization": f"Bearer {jt}", "X-Job": "other"}).text == "t"
+    assert str(seen[0].url).startswith("http://10.0.0.7:8000/")
+    c.post("/process", content=PNG, headers={**h, "Authorization": "Bearer tl", "X-Job": "j1"})  # profile token + forged id: not recorded
+    r = c.get("/admin/jobs/j1/usage", headers=adm).json()
+    assert r["truncated"] and len(r["calls"]) == 2
+    assert r["calls"][0] | {"t": 0} == {"feature": "ocr", "profile": "lan", "model": "m2", "unit": "tokens", "outcome": "ok", "input": 5, "output": 2, "t": 0}
+    assert c.get("/admin/jobs/j1/usage", headers=adm).status_code == 404  # read once
+    assert c.post("/process", content=PNG, headers={**h, "Authorization": f"Bearer {jt}"}).status_code == 401  # the job token died with it
+
+
+def test_job_token_expires_and_failures_are_recorded():
+    clock = [1000.0]
+    from usage import Usage
+    u = Usage("adm", clock=lambda: clock[0])
+    app = sidecar.make_app(PROFILES, transport=httpx.MockTransport(lambda r: httpx.Response(500)), admin_token="adm")
+    c = TestClient(app)
+    jt = c.post("/admin/jobs", json={"job": "j", "profile": "lan", "ttl": 5}, headers={"Authorization": "Bearer adm"}).json()["token"]
+    assert c.post("/process", content=PNG, headers={"Authorization": f"Bearer {jt}", "Content-Type": "image/png"}).status_code == 502
+    assert c.get("/admin/jobs/j/usage", headers={"Authorization": "Bearer adm"}).json()["calls"][0]["outcome"] == "error"
+    u.tokens["x"] = ("j", "lan", 1005.0)
+    assert u.resolve("x") == ("lan", "j")
+    clock[0] = 1006.0
+    assert u.resolve("x") is None
+    assert TestClient(sidecar.make_app(PROFILES)).post("/admin/jobs", json={"job": "j", "profile": "lan"}).status_code in (401, 404)  # no admin token: no routes in use
