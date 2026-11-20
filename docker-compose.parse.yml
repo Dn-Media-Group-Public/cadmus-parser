@@ -8,7 +8,7 @@ version: "3.8"
 
 services:
   parser:
-    image: ${IMAGE_PREFIX:-}cadmus-parser:${IMAGE_TAG:-local}   # a processor-less image: the overlay replaces this with the client's own
+    image: ${IMAGE_PREFIX:-}cadmus-parser:${IMAGE_TAG:-local}   # the ready-made image (default processors); the overlay replaces it with your own
     # The wrapper keeps exactly what the uid lifecycle needs (server/entrypoint.sh drops the rest and sets no_new_privs); SETPCAP is for that drop.
     cap_drop: [ALL]
     cap_add: [SETUID, SETGID, CHOWN, KILL, SETPCAP]

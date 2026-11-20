@@ -1,89 +1,101 @@
-# Quickstart
+# Quickstart: a new client app
 
-A client stack with one service (`app`), the parser service and a toy processor, end to end. You need Docker Swarm and an S3-compatible bucket (the example
-uses a store reachable at `http://store:9000`).
+You write a **client**: a service that hands files to cadmus and reads back what it made of them. Here it is end to end: its Dockerfile, its `docker-compose.yml` (a swarm
+stack file; that is only the conventional file name) and the Python that calls cadmus. You need Docker Swarm (`docker swarm init`) and an S3-compatible bucket; the example
+uses `http://store:9000`.
 
-## 1. A processor
+Project layout (`lib/cadmus-parser` is this repository, as a submodule or a plain clone):
 
-```python
-# toy/toy/processor.py
-class Upper:
-    name = "upper"
-    top_dirs = ("upper",)
-
-    def accepts(self, file):
-        return file.name.endswith(".txt")
-
-    def process(self, sink, file, ctx):
-        with open(file.path, "rb") as f:
-            sink.put_bytes(f"upper/{file.rel}", f.read().upper(), "text/plain")
+```
+myapp/
+  lib/cadmus-parser/
+  Dockerfile
+  docker-compose.yml
+  app.py
 ```
 
-```toml
-# toy/pyproject.toml
-[project]
-name = "toy"
-version = "0.1.0"
-[project.entry-points."cadmus_parser.processors"]
-upper = "toy.processor:Upper"
-```
-
-## 2. Images
-
-```sh
-git clone https://github.com/Dn-Media-Group-Public/cadmus-parser lib/cadmus-parser     # or: git submodule add ... lib/cadmus-parser
-docker build -f lib/cadmus-parser/blob-sidecar/Dockerfile -t cadmus-parser-blob-sidecar:local lib/cadmus-parser
-```
+## Dockerfile
 
 ```dockerfile
-# parser/Dockerfile
 FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-venv python3-pip && rm -rf /var/lib/apt/lists/* \
+ && python3 -m venv /venv
 ENV PATH=/venv/bin:$PATH
 ADD lib/cadmus-parser /cadmus
-RUN /cadmus/server/install.sh s3
-COPY toy/ /src/toy/
-RUN pip install --no-cache-dir /src/toy && chmod -R a+rX /venv
-VOLUME /scratch
-ENTRYPOINT ["tini", "--", "/cadmus/server/entrypoint.sh"]
+RUN pip install --no-cache-dir "/cadmus/client[mint-s3]" s3fs
+COPY app.py /app/app.py
+CMD ["python", "/app/app.py"]
 ```
 
-`docker build -t myorg-parser:local -f parser/Dockerfile .` (see [How to build the parser image](parser-image.md)).
+## docker-compose.yml
 
-## 3. The stack
-
-`app` is your service (its image: `ADD lib/cadmus-parser /cadmus` and `RUN pip install /cadmus/client`, see [How to build a client image](client-image.md)); it only needs `PARSE_URL` and `PARSE_TOKEN`, which the overlay adds.
-
-```sh
-pip install ./lib/cadmus-parser/server
-python -m cadmus_parser_server.overlay --client app --parser-image myorg-parser:local > parse-overlay.yml
-export WRAPPER_TOKEN=$(openssl rand -hex 32) PROXY_TOKEN=$(openssl rand -hex 32)
-export PARSE_BLOB_OPTIONS='{"endpoint_url": "http://store:9000"}'     # no secrets: credentials come with each job
-docker swarm init   # once
-docker stack deploy -c docker-compose.yml -c lib/cadmus-parser/docker-compose.parse.yml -c parse-overlay.yml mystack
+```yaml
+version: "3.8"
+services:
+  app:
+    image: myapp:local
+    environment:
+      STORE_BUCKET: bucket
+      STORE_ENDPOINT: http://store:9000
+      STORE_KEY: ${STORE_KEY}
+      STORE_SECRET: ${STORE_SECRET}
+    networks: [public]        # the cadmus overlay adds the private network to the parser, PARSE_URL and PARSE_TOKEN
+networks:
+  public: { driver: overlay }
 ```
 
-(`docker-compose.yml` is your own swarm stack file defining `app` and the network `public`; the name is just the conventional file name.) If your store runs inside the
-stack, add `--dev-store host:port` to the overlay: the proxy may then reach exactly that address and port.
-
-## 4. A job
+## app.py
 
 ```python
 import os
+
+import fsspec
 from cadmus_parser import Client, mint, renew_loop
 
-client = Client(os.environ["PARSE_URL"], os.environ["PARSE_TOKEN"], store_options={"endpoint_url": "http://store:9000"})
-inp, out = "s3://bucket/jobs/1/in", "s3://bucket/jobs/1/out"
+endpoint = os.environ["STORE_ENDPOINT"]
+store = {"key": os.environ["STORE_KEY"], "secret": os.environ["STORE_SECRET"], "endpoint_url": endpoint}   # your own identity: minting needs IAM rights
+base = f"s3://{os.environ['STORE_BUCKET']}/jobs/1"
+inp, out = f"{base}/in", f"{base}/out"
+
+# 1. put the files to parse under the input prefix
+fs = fsspec.filesystem("s3", **store)
+fs.pipe_file(f"{inp[5:]}/hello.txt", b"hello, cadmus")
+
+# 2. credentials for exactly these two prefixes, nothing else (revoked when the block ends)
+client = Client(os.environ["PARSE_URL"], os.environ["PARSE_TOKEN"], store_options={"endpoint_url": endpoint})
 grants = [(inp, "read"), (out, "write")]
-with mint(grants, options={"key": "...", "secret": "...", "endpoint_url": "http://store:9000"}) as creds:    # your own identity: it needs IAM rights
-    # ... upload some .txt files under s3://bucket/jobs/1/in/ ...
-    started = client.post(inp, out, creds)
-    loop = renew_loop(client, grants, started.id, started.owner, creds)
+with mint(grants, options=store) as creds:
+    started = client.post(inp, out, creds)                                     # 202: the job runs
+    loop = renew_loop(client, grants, started.id, started.owner, creds, options=store)   # keeps the credentials alive for long jobs
     try:
-        print(client.wait(out, lambda: loop.current[out]))                      # {"status": "done", ...}
-        print(client.index(out, loop.current[out])["files"])                    # {"a.txt": {"size": 5, "outputs": {"upper/a.txt": {...}}}}
+        status = client.wait(out, lambda: loop.current[out])                   # reads status.json from the store
+        index = client.index(out, loop.current[out])                           # what came out of each input
     finally:
         loop.stop()
+
+print(status)                                                                  # {'status': 'done', ...}
+for name, entry in index["files"].items():
+    print(name, entry["size"], list(entry["outputs"]))                         # hello.txt 13 ['parsed/hello.txt.md', ...]
 ```
 
-`s3://bucket/jobs/1/out/upper/a.txt` now holds the upper-cased file, `index.json` and `status.json` sit beside it, and the parser that read `a.txt` never held a
-credential or had a route out.
+`out/parsed/hello.txt.md` now holds the Markdown, `out/index.json` and `out/status.json` sit beside it. Your app never sends file bytes to cadmus and never holds more than the two
+prefixes it asked for. [Client and minting reference](client.md) · [reference](reference.md).
+
+## Deploy
+
+Build the app and the two cadmus images, generate the overlay (it joins your `app` to the parser on a private network and gives it `PARSE_URL` and `PARSE_TOKEN`), deploy:
+
+```sh
+docker build -t myapp:local .
+docker build -f lib/cadmus-parser/server/Dockerfile -t cadmus-parser:local lib/cadmus-parser
+docker build -f lib/cadmus-parser/blob-sidecar/Dockerfile -t cadmus-parser-blob-sidecar:local lib/cadmus-parser
+docker run --rm cadmus-parser:local python -m cadmus_parser_server.overlay --client app > parse-overlay.yml
+
+export WRAPPER_TOKEN=$(openssl rand -hex 32) PROXY_TOKEN=$(openssl rand -hex 32)
+export PARSE_BLOB_OPTIONS='{"endpoint_url": "http://store:9000"}'      # no secrets: credentials come with each job
+export STORE_KEY=... STORE_SECRET=...
+docker stack deploy -c docker-compose.yml -c lib/cadmus-parser/docker-compose.parse.yml -c parse-overlay.yml mystack
+docker service logs -f mystack_app
+```
+
+If the store runs inside your own stack, add `--dev-store host:port` to the overlay command: the egress proxy may then reach exactly that address and port.
