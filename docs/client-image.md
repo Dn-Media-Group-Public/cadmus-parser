@@ -1,6 +1,6 @@
-# How to build a consumer image
+# How to build a client image
 
-A consumer is the service that posts jobs. Its image needs only the client library, a plain pip package (`httpx`, `fsspec`; extras `mint-s3` = boto3, `mint-gcs` = google-auth):
+A client is the service that posts jobs. Its image needs only the client library, a plain pip package (`httpx`, `fsspec`; extras `mint-s3` = boto3, `mint-gcs` = google-auth):
 
 ```dockerfile
 ADD lib/cadmus-parser /cadmus

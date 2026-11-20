@@ -1,13 +1,13 @@
-"""Job-scoped store credentials for a consumer of the wrapper: `mint(grants)` turns "these URLs, read or write" into the fsspec `storage_options`
+"""Job-scoped store credentials for a client of the wrapper: `mint(grants)` turns "these URLs, read or write" into the fsspec `storage_options`
 fragment each URL needs, limited to exactly those prefixes. `read` means read and list; `write` means read, list and write (the wrapper reads
 status.json under the output base and lists the input base).
 
 S3 / SeaweedFS: one IAM role per store with its own policy (no broad role behind it, no session policy to forget), assumed with STS; deleting the
 role revokes the credential at once. GCS: a Credential Access Boundary (a downscoped token): narrow by construction, it cannot be revoked and
-lives as long as the source credential. Every failure raises: there is no fallback to the consumer's own credential.
+lives as long as the source credential. Every failure raises: there is no fallback to the client's own credential.
 
 `mint` returns a `Handle`: the `{url: options}` mapping, with `revoke()`, a persistable form that holds only what is needed to revoke (never a
-secret) and a context manager. `sweep(max_age)` removes helper-created roles that were never revoked. `options` is the consumer's own identity
+secret) and a context manager. `sweep(max_age)` removes helper-created roles that were never revoked. `options` is the client's own identity
 for the store (fsspec-style: key, secret, token, endpoint_url, client_kwargs); without it boto3 / google-auth find their defaults."""
 
 import collections.abc
@@ -109,7 +109,7 @@ class Handle(collections.abc.Mapping):
 
     @classmethod
     def from_dict(cls, d: dict, options: dict | None = None) -> "Handle":
-        """Restore for `revoke()`; `options` is the consumer's own identity (not persisted: it is a secret)."""
+        """Restore for `revoke()`; `options` is the client's own identity (not persisted: it is a secret)."""
         return cls({}, list(d["stores"]), options)
 
     def __enter__(self):
@@ -123,7 +123,7 @@ def _mint_s3(bucket: str, grants: list, lifetime: int, options: dict) -> tuple[d
     iam, sts = _aws("iam", options), _aws("sts", options)
     name = f"{ROLE_PREFIX}{secrets.token_hex(12)}"
     trust = {"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Action": "sts:AssumeRole",
-                                                     "Principal": {"AWS": sts.get_caller_identity()["Arn"]}}]}  # the consumer's own identity
+                                                     "Principal": {"AWS": sts.get_caller_identity()["Arn"]}}]}  # the client's own identity
     role = iam.create_role(RoleName=name, AssumeRolePolicyDocument=json.dumps(trust))["Role"]["Arn"]
     try:
         pol = iam.create_policy(PolicyName=name, PolicyDocument=json.dumps(s3_policy(bucket, grants), separators=(",", ":")))["Policy"]["Arn"]
@@ -174,8 +174,8 @@ def mint(grants: list[tuple[str, str]], lifetime: int = LIFETIME, options: dict 
 
 
 def sweep(max_age: float = LIFETIME + 300, options: dict | None = None) -> int:
-    """Delete helper-created roles (prefix `cadmus-parser-`) older than `max_age` seconds: those a crashed consumer never revoked. S3 only; the
-    consumer schedules it. Returns the number deleted."""
+    """Delete helper-created roles (prefix `cadmus-parser-`) older than `max_age` seconds: those a crashed client never revoked. S3 only; the
+    client schedules it. Returns the number deleted."""
     iam, n = _aws("iam", options or {}), 0
     for page in iam.get_paginator("list_roles").paginate():
         for r in page["Roles"]:

@@ -1,7 +1,7 @@
 #!/bin/sh
 # Installs the parser service into the image being built, on any Debian/Ubuntu base that has python3 (python3-venv, pip): tini and util-linux
 # (setpriv), the `wrapper` uid 900 and its /scratch, a venv /venv with cadmus-parser-server (extras from $1, default `s3`; e.g. `s3,files`).
-# Run it from a consumer's Dockerfile after `ADD lib/cadmus-parser /cadmus`:   RUN /cadmus/server/install.sh s3,files
+# Run it from a client's Dockerfile after `ADD lib/cadmus-parser /cadmus`:   RUN /cadmus/server/install.sh s3,files
 # The image then needs ENV PATH=/venv/bin:$PATH and ENTRYPOINT ["tini", "--", "/cadmus/server/entrypoint.sh"]. A processor package of your own: RUN pip install /yours.
 set -e
 here=$(cd "$(dirname "$0")" && pwd)

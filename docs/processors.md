@@ -23,7 +23,7 @@ Each resolves to a processor object (or a class, which is instantiated with no a
 | `accepts(file) -> bool` | cheap; may look at `file.name`, `file.size`, the first bytes |
 | `process(sink, file, ctx)` | do the work |
 
-Nothing the caller sends is imported, and the consumer does not select processors: an image has none unless it installs one, and has whichever packages it installs. A
+Nothing the caller sends is imported, and the client does not select processors: an image has none unless it installs one, and has whichever packages it installs. A
 processor whose import fails (an extra that is not installed) is skipped with a line on the parser's stderr.
 
 ## The default processors
@@ -65,7 +65,7 @@ class Upper:
 - `sink.put_bytes(rel, data, content_type, meta=None)` and `sink.put_file(rel, src, content_type, meta=None)` (moves `src`, a file in `ctx.work`, into the
   output) write `rel`, a path below the output base starting with one of your `top_dirs` and at least one more element. `sink.info(content_type=None, meta=None,
   size=None)` says something about the input itself (`size` counts only for archive members); `sink.note(text)` adds a note to its entry. `meta` is a small
-  JSON object (at most 2000 bytes) passed through to `index.json`, e.g. `{"text": true}`. All of it is untrusted by the consumer: the parser may be hostile.
+  JSON object (at most 2000 bytes) passed through to `index.json`, e.g. `{"text": true}`. All of it is untrusted by the client: the parser may be hostile.
 - `ctx.options` is this processor's own entry of the job's `options`; `ctx.features` the feature names the job asked for (their `<PREFIX>_URL` /
   `<PREFIX>_TOKEN` are in the environment, for the profile it named); `ctx.work` a scratch directory.
 - **Archives.** Unpack into `ctx.work` yourself and call `ctx.recurse(path, name)` for each member: the worker runs the same chain on it (as a `File` with a longer

@@ -13,21 +13,21 @@ The **parser** (the process that reads untrusted bytes) is confined to **one rea
   reserved, so a parser cannot write them;
 - after every job the uid's processes are killed and everything it owned is removed and verified; a slot that cannot be cleaned is quarantined, never reused.
 
-## What the consumer must do
+## What the client must do
 
-The consumer is **trusted**: it chooses the two base URLs and the credentials, and the wrapper uses them as given. There is no base-URL allow-list, no scheme
+The client is **trusted**: it chooses the two base URLs and the credentials, and the wrapper uses them as given. There is no base-URL allow-list, no scheme
 allow-list and no option filter. Therefore:
 
 1. **Mint job-scoped credentials.** Read the input prefix, write the output prefix, nothing else (`read` = read and list, `write` = read, list and write). The
    wrapper cannot tell a job's prefix from any other prefix; only the store's own enforcement of the credential confines it. A credential broader than the job
-   (a project-wide read, say) lets a consumer bug make the wrapper copy or overwrite whatever the credential reaches. Choose a wider read grant only deliberately.
+   (a project-wide read, say) lets a client bug make the wrapper copy or overwrite whatever the credential reaches. Choose a wider read grant only deliberately.
 2. **Never build URLs or options from untrusted input.** They go to fsspec as given: `file://`, `http://`, chained filesystems (`simplecache::s3://...`) and, for
    `gcsfs`, a local credentials file are all reachable. Take them from your own validated state (ids you generated, not paths a user typed).
 3. **Keep output bases disjoint.** A job's identity is its output base URL. The wrapper refuses (409) only an **identical** base that is running; nested or
    overlapping bases are not detected and share (and can corrupt) each other's `status.json`, `index.json` and artefacts.
-4. **Keep the wrapper token away from untrusted data.** It is one shared secret, in your services' environment. Only your services, on their per-consumer parse
+4. **Keep the wrapper token away from untrusted data.** It is one shared secret, in your services' environment. Only your services, on their per-client parse
    networks, can reach the wrapper at all (the overlay generator does that wiring).
-5. **Authorise your end users yourself.** The wrapper authorises only the consumer, by its token.
+5. **Authorise your end users yourself.** The wrapper authorises only the client, by its token.
 
 ## What is accepted
 
@@ -35,7 +35,7 @@ A stolen wrapper token, with no store credential, makes the wrapper an authentic
 host the egress proxy allows (the whole public internet; private ranges, the metadata server and other stack services are blocked, except what
 `PARSE_PROXY_ALLOW` names), run the files through the parsers (free compute, and a way to attack the parsers from outside the intended path) and upload the
 results elsewhere. With no scheme filter it can also name `file://` or `http://` URLs and make the wrapper read its own files or make requests; the wrapper's
-secrets are readable only by its own uid, but treat the token as the key to that. It cannot reach your real store without a credential for it. A consumer bug, or a
+secrets are readable only by its own uid, but treat the token as the key to that. It cannot reach your real store without a credential for it. A client bug, or a
 stolen token together with a credential, reaches whatever that credential reaches. Rotate `WRAPPER_TOKEN` and `PROXY_TOKEN` if either may have leaked; keep the two
 different.
 

@@ -1,6 +1,6 @@
 # Quickstart
 
-A consumer stack with one service (`app`), the parser service and a toy processor, end to end. You need Docker Swarm and an S3-compatible bucket (the example
+A client stack with one service (`app`), the parser service and a toy processor, end to end. You need Docker Swarm and an S3-compatible bucket (the example
 uses a store reachable at `http://store:9000`).
 
 ## 1. A processor
@@ -51,11 +51,11 @@ ENTRYPOINT ["tini", "--", "/cadmus/server/entrypoint.sh"]
 
 ## 3. The stack
 
-`app` is your service (its image: `ADD lib/cadmus-parser /cadmus` and `RUN pip install /cadmus/client`, see [How to build a consumer image](consumer-image.md)); it only needs `PARSE_URL` and `PARSE_TOKEN`, which the overlay adds.
+`app` is your service (its image: `ADD lib/cadmus-parser /cadmus` and `RUN pip install /cadmus/client`, see [How to build a client image](client-image.md)); it only needs `PARSE_URL` and `PARSE_TOKEN`, which the overlay adds.
 
 ```sh
 pip install ./lib/cadmus-parser/server
-python -m cadmus_parser_server.overlay --consumer app --parser-image myorg-parser:local > parse-overlay.yml
+python -m cadmus_parser_server.overlay --client app --parser-image myorg-parser:local > parse-overlay.yml
 export WRAPPER_TOKEN=$(openssl rand -hex 32) PROXY_TOKEN=$(openssl rand -hex 32)
 export PARSE_BLOB_OPTIONS='{"endpoint_url": "http://store:9000"}'     # no secrets: credentials come with each job
 docker swarm init   # once

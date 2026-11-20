@@ -1,5 +1,5 @@
 """A wrapper in a thread of the test process over `file://` stores: not root, so slots run as the test's own uid; the parser is a stand-in script
-or the real worker. No object store and no consumer library: the library's tests stand alone."""
+or the real worker. No object store and no client library: the library's tests stand alone."""
 
 import json
 import os

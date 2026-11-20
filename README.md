@@ -14,7 +14,7 @@ video go in; text, outlines and structured data come out, as artefacts in your o
 - **File metadata** as YAML: EXIF/GPS, Office tracked changes and comments, GeoTIFF/GDAL and vector (GPX, KML, GeoJSON, GeoPackage, shapefile) CRS and bounds, audio/video streams and chapters, PDF edit history
 - **Your own formats**: add a processor package; processors are ordered, run per file and can recurse into archives ([how](docs/processors.md))
 
-Other consumer-facing capabilities: per-media-class limits (deadline, memory, file and tree sizes) set by the operator only; a per-input `index.json` that says what came out of
+Other client-facing capabilities: per-media-class limits (deadline, memory, file and tree sizes) set by the operator only; a per-input `index.json` that says what came out of
 each file and archive member; job-scoped, renewable store credentials (S3 and GCS) so a long video does not outlive its access; any fsspec store; horizontally scalable
 (each replica has its own uid pool); one instance per consuming stack.
 
@@ -34,32 +34,40 @@ Only Docker Swarm stacks are supported (`docker stack deploy`).
 
 ## Threat model
 
-The adversary is **the file, and so the parser** that reads it. The consumer (your service) is trusted, and so is the wrapper.
+The adversary is **the file, and so the parser** that reads it. The client (your service) is trusted, and so is the wrapper.
 
 | | Protected | Not protected |
 |---|---|---|
 | The parser process | no credential, token, store URL or environment secret (it gets only settings, and the one sidecar profile its job asked for); a pool uid with no capabilities, `no_new_privs`, no readable files outside its job, rlimits and a wall-clock deadline per media class; internal-only networks, so no route out; wiped and verified after every job | a bug in the kernel or the container runtime |
 | What it can write | only below the output base, under top-level directories the installed processors declare, as regular files (`O_NOFOLLOW`), sizes from the wrapper's own `fstat`, record, line and total-byte caps | |
 | What it can read | only the input tree the wrapper pulled | |
-| The wrapper API | one bearer token (the consumer's) | a stolen token (see the [security guide](docs/security.md)) |
-| The stores | whatever the credential the consumer hands over for each job allows: mint it job-scoped ([client guide](docs/client.md)) | a consumer that builds URLs or options from untrusted input, or hands over a broad credential |
+| The wrapper API | one bearer token (the client's) | a stolen token (see the [security guide](docs/security.md)) |
+| The stores | whatever the credential the client hands over for each job allows: mint it job-scoped ([client guide](docs/client.md)) | a client that builds URLs or options from untrusted input, or hands over a broad credential |
+
+## Who is who
+
+- **Client**: a service written by someone else (a web app, say) that uses cadmus. Its image is built from anything (Debian ...) with `ADD lib/cadmus-parser /cadmus` and
+  `RUN pip install /cadmus/client`; it calls the wrapper over REST with the `cadmus_parser` Python library. ([client image](docs/client-image.md))
+- **Wrapper** (`cadmus_parser_server`): the privileged, processor-independent Python code that copies data between blob storage and the processors.
+- **Processor**: untrusted Python code that does the parsing. It runs in the wrapper's container, as a different (pool) user with nothing. (What the rest of these docs call
+  "the parser" is the processor process.) ([how to write one](docs/processors.md), [the parser image](docs/parser-image.md))
 
 ## Parts
 
 | Part | What it is |
 |---|---|
 | `server/` (`cadmus-parser-server`) | the wrapper (HTTP API, uid pool, upload, `status.json`/`index.json`), the worker (the sandboxed process), the processor registry, the default processors (the `files` extra) and the stack-file overlay generator |
-| `client/` (`cadmus-parser`) | what a consumer uses: `Client` (post a job, wait, read the index), `mint` (job-scoped store credentials) and `renew_loop` (keeps them alive during long jobs) |
+| `client/` (`cadmus-parser`) | what a client uses: `Client` (post a job, wait, read the index), `mint` (job-scoped store credentials) and `renew_loop` (keeps them alive during long jobs) |
 | `blob-sidecar/` | the authenticated egress proxy (squid) the wrapper reaches the store through; public internet only |
 | `ocr-sidecar/` | a forwarder to OpenAI-compatible OCR endpoints, one token per profile; the model for [your own sidecar](docs/sidecar-protocol.md) |
 | `docker-compose.parse.yml` | the swarm stack file: `parser`, `blob-sidecar`, networks and capabilities |
-| `server/install.sh`, `server/Dockerfile` | what a consumer image runs after `ADD lib/cadmus-parser /cadmus` (see [consumer image](docs/consumer-image.md)); the Dockerfile is a ready-made image with no processor |
+| `server/install.sh`, `server/Dockerfile` | what the **parser image** (wrapper plus processors) runs after `ADD lib/cadmus-parser /cadmus` (see [the parser image](docs/parser-image.md)); the Dockerfile is a ready-made one with no processor |
 
 ## Documentation
 
-- [Quickstart](docs/quickstart.md): a minimal consumer stack and a toy processor, end to end
+- [Quickstart](docs/quickstart.md): a minimal client stack and a toy processor, end to end
 - [Reference](docs/reference.md): wrapper HTTP API, `index.json`, processor entry point, stack file, environment variables, `PARSE_LIMITS`
-- [How to write a processor](docs/processors.md) · [How to build a consumer image](docs/consumer-image.md) · [the parser image](docs/parser-image.md) · [How to write a sidecar](docs/sidecar-protocol.md)
+- [How to write a processor](docs/processors.md) · [How to build a client image](docs/client-image.md) · [the parser image](docs/parser-image.md) · [How to write a sidecar](docs/sidecar-protocol.md)
 - [Client and credential minting](docs/client.md)
 - [Security guide](docs/security.md) · [Versioning and upgrades](docs/versioning.md)
 

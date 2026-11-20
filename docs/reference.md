@@ -92,15 +92,15 @@ Group `cadmus_parser.processors`; see [How to write a processor](processors.md).
   `host:port` exceptions, for a store inside your stack); networks `parse-egress` and `public`.
 - the `public` network (the way out of the proxy); the same definition may be in your own stack file.
 
-The overlay (`python -m cadmus_parser_server.overlay --consumer web --consumer worker [--dev-store host:port] [--ocr] [--parser-image my/parser:1]`) adds a
-network `<consumer>-parse` per consumer service that only that consumer and the parser are on, `PARSE_URL=http://parser:8080` and
-`PARSE_TOKEN=${WRAPPER_TOKEN}` in each consumer, your image for `parser`, the dev store's network for the proxy and the `ocr-sidecar` with `--ocr`.
+The overlay (`python -m cadmus_parser_server.overlay --client web --client worker [--dev-store host:port] [--ocr] [--parser-image my/parser:1]`) adds a
+network `<client>-parse` per client service that only that client and the parser are on, `PARSE_URL=http://parser:8080` and
+`PARSE_TOKEN=${WRAPPER_TOKEN}` in each client, your image for `parser`, the dev store's network for the proxy and the `ocr-sidecar` with `--ocr`.
 
 ## Environment variables
 
 | Variable | Used by | Meaning |
 |---|---|---|
-| `WRAPPER_TOKEN` | parser; consumers as `PARSE_TOKEN` | the wrapper's bearer token (a secret) |
+| `WRAPPER_TOKEN` | parser; clients as `PARSE_TOKEN` | the wrapper's bearer token (a secret) |
 | `PROXY_TOKEN` | parser, blob-sidecar | the wrapper's credential to the egress proxy; different from `WRAPPER_TOKEN` |
 | `PARSE_PROXY_HOST` | parser | `host:port` of the proxy (stack file: `blob-sidecar:3128`) |
 | `PARSE_PROXY_ALLOW` | blob-sidecar | `host:port` exceptions to "public internet only" |
@@ -145,7 +145,7 @@ built-in is finite, for every class**; `0` is accepted only when the operator wr
 
 **The wrapper picks the class.** After pulling the tree it classifies each file by extension and, failing that, by its first 16 bytes against a built-in table of
 magic numbers (nothing is decoded). The job runs under the **per-limit maximum over the classes present** (0 counts as the largest): a photo next to a video
-gets the video's limits. A consumer that needs tighter limits splits the tree into one job per class itself. An archive counts as `archive` for itself and
+gets the video's limits. A client that needs tighter limits splits the tree into one job per class itself. An archive counts as `archive` for itself and
 everything in it (it is only unpacked inside the parser, under the limits already chosen): set `archive.*` generously.
 
 `input_mib` is checked twice: before the pull, against the largest of any class (the operator's ceiling), from the object listing (the credential needs list

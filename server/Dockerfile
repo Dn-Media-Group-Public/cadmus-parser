@@ -1,4 +1,4 @@
-# A ready-made parser image with NO processor (a consumer normally builds its own: see docs/parser-image.md).
+# A ready-made parser image with NO processor (a client normally builds its own: see docs/parser-image.md).
 # Build context: the repo root (docker build -f server/Dockerfile .).
 FROM debian:bookworm-slim
 ENV PATH=/venv/bin:$PATH

@@ -1,4 +1,4 @@
-"""Keep a long job's credentials alive: the consumer pushes. A thread mints fresh credentials every `interval` seconds (well under half the
+"""Keep a long job's credentials alive: the client pushes. A thread mints fresh credentials every `interval` seconds (well under half the
 lifetime) and sends them to the replica that owns the job. Stopping the pushes ends the job's access when the current credential expires."""
 
 import logging
@@ -15,12 +15,12 @@ log = logging.getLogger("cadmus_parser.renew")
 
 class RenewLoop:
     """`stop()` ends the thread and revokes every credential the loop minted and `first`. `lost` is True when the job's replica is gone (404 or
-    unreachable), `finished` when it answered 410; the consumer then marks the job failed ("wrapper lost") or lets the status say."""
+    unreachable), `finished` when it answered 410; the client then marks the job failed ("wrapper lost") or lets the status say."""
 
     def __init__(self, client, grants, job_id: str, owner: str, first=None, interval: float = 300, lifetime: int = 900, options: dict | None = None,
                  retries: int = 3, retry_delay: float = 1, rekey: Mapping | None = None, on_mint=None):
         """`rekey` = {grant url: posted url} when a grant was wider than a posted url (see Client.renew). `on_mint(handle)` is called with every
-        handle the loop mints, for a consumer that keeps a registry of live credentials."""
+        handle the loop mints, for a client that keeps a registry of live credentials."""
         self.client, self.grants, self.id, self.owner, self.rekey, self.on_mint = client, list(grants), job_id, owner, rekey, on_mint
         self.interval, self.lifetime, self.options, self.retries, self.retry_delay = interval, lifetime, options, retries, retry_delay
         self.handles = [first] if first is not None else []

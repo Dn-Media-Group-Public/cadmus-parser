@@ -1,5 +1,5 @@
-"""The parser wrapper: the trusted half of the parser container. It authenticates the consumer, pulls an input tree from a store with the
-consumer's credential (through the egress proxy), runs the sandboxed parser on a pool uid that can read nothing and authenticate to nothing,
+"""The parser wrapper: the trusted half of the parser container. It authenticates the client, pulls an input tree from a store with the
+client's credential (through the egress proxy), runs the sandboxed parser on a pool uid that can read nothing and authenticate to nothing,
 validates and uploads what the parser announces on its stdout pipe, and writes `index.json` and `status.json` under the output base. The
 parser never sees a credential or a token other than (if the job asked for a feature) one profile's.
 
@@ -7,7 +7,7 @@ parser never sees a credential or a token other than (if the job asked for a fea
   POST /jobs/renew  {id, options: {<url>: {...}}}                                          -> 200 | 400 | 401 | 404 | 410
   GET  /version, GET /health
 
-Every non-2xx answer has a JSON body {"error": "...", "traceback"?: "..."}. There is no GET of a job: the consumer reads status.json and
+Every non-2xx answer has a JSON body {"error": "...", "traceback"?: "..."}. There is no GET of a job: the client reads status.json and
 index.json from the output base. Runs as its own uid with CAP_SETUID/SETGID/CHOWN/KILL: pool uids are UID_BASE.. . Without CAP_SETUID (tests):
 one pseudo uid per slot, no setuid."""
 
@@ -276,7 +276,7 @@ class Index:
 
 
 class Side:
-    """One end of a job: a base URL and the credential for it, replaceable while the job runs (the consumer renews it)."""
+    """One end of a job: a base URL and the credential for it, replaceable while the job runs (the client renews it)."""
 
     def __init__(self, w: "Wrapper", url: str, options: dict):
         self.w, self.url, self._options, self.lock = w, url, options, threading.Lock()
@@ -656,7 +656,7 @@ def make_app(cfg: Config) -> Starlette:
             raise
         w.jobs[job.id] = job
         threading.Thread(target=job.run, daemon=True).start()
-        host, port = request.scope.get("server") or ("", 0)  # the address this request arrived on: where the consumer reaches this replica
+        host, port = request.scope.get("server") or ("", 0)  # the address this request arrived on: where the client reaches this replica
         return JSONResponse({"status": "running", "id": job.id, "owner": f"[{host}]:{port}" if ":" in host else f"{host}:{port}"}, 202)
 
     async def renew(request: Request):

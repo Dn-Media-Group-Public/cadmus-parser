@@ -1,5 +1,5 @@
 """Post a job to the wrapper and follow it. The wrapper has no GET: the client reads `status.json` and `index.json` from the output base with the
-credential the consumer already has (the heartbeat rule: the wrapper rewrites `running` every 10 s, one older than 30 s means the wrapper is lost)."""
+credential the client already has (the heartbeat rule: the wrapper rewrites `running` every 10 s, one older than 30 s means the wrapper is lost)."""
 
 import json
 import time
@@ -22,7 +22,7 @@ class ParseError(Exception):
 
 class Started(NamedTuple):
     id: str  # opaque parse job id, the handle for renewals
-    owner: str  # ip:port of the replica that took the job, on this consumer's network
+    owner: str  # ip:port of the replica that took the job, on this client's network
 
 
 def wire(options: dict) -> dict:
@@ -44,7 +44,7 @@ def _error(r: httpx.Response) -> ParseError:
 
 
 class Client:
-    """`store_options`: this consumer's own non-secret fsspec options for the store (endpoint ...), merged under the credentials when it reads."""
+    """`store_options`: this client's own non-secret fsspec options for the store (endpoint ...), merged under the credentials when it reads."""
 
     def __init__(self, url: str, token: str, store_options: dict | None = None, timeout: float = 30):
         self.url, self.token, self.store_options, self.timeout = url.rstrip("/"), token, store_options or {}, timeout

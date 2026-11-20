@@ -1,14 +1,14 @@
-# The parser service as a library (docs/reference.md): what interprets an untrusted file runs here, not in the consumer. `parser` = the wrapper
+# The parser service as a library (docs/reference.md): what interprets an untrusted file runs here, not in the client. `parser` = the wrapper
 # (storage <-> parser, holds the tokens) plus sandboxed parser processes on pool uids that can read nothing, reach nothing and authenticate to
 # nothing; `blob-sidecar` = the authenticated egress proxy the wrapper reaches the store through (the parser has no route out: its networks are
 # internal). Deploy with `docker stack deploy -c docker-compose.parse.yml -c <overlay> ...`; `python -m cadmus_parser_server.overlay` writes
-# the overlay: a `<consumer>-parse` network per consumer service (the consumer and the parser on it), PARSE_URL/PARSE_TOKEN in each consumer,
+# the overlay: a `<client>-parse` network per client service (the client and the parser on it), PARSE_URL/PARSE_TOKEN in each client,
 # the dev store's network for the proxy, your image for `parser` and the `ocr-sidecar` when OCR is configured.
 version: "3.8"
 
 services:
   parser:
-    image: ${IMAGE_PREFIX:-}cadmus-parser:${IMAGE_TAG:-local}   # a processor-less image: the overlay replaces this with the consumer's own
+    image: ${IMAGE_PREFIX:-}cadmus-parser:${IMAGE_TAG:-local}   # a processor-less image: the overlay replaces this with the client's own
     # The wrapper keeps exactly what the uid lifecycle needs (server/entrypoint.sh drops the rest and sets no_new_privs); SETPCAP is for that drop.
     cap_drop: [ALL]
     cap_add: [SETUID, SETGID, CHOWN, KILL, SETPCAP]
@@ -50,6 +50,6 @@ services:
     networks: [parse-egress, public]   # public: the way out (the egress rules keep it off every private range)
 
 networks:
-  public: { driver: overlay }                        # the way out of the proxy (the same definition may be in the consumer's stack file)
+  public: { driver: overlay }                        # the way out of the proxy (the same definition may be in the client's stack file)
   parse-egress: { driver: overlay, internal: true }   # parser <-> proxy: no route out
   parse-ocr: { driver: overlay, internal: true }      # parser <-> ocr-sidecar

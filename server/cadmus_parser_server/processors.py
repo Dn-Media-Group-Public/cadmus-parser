@@ -1,5 +1,5 @@
 """The processor registry: every `cadmus_parser.processors` entry point is a processor (name, optional before/after lists of names, top_dirs,
-accepts(file), process(sink, file, ctx)). The consumer never selects one. A processor whose import fails (the `files` extra is not installed)
+accepts(file), process(sink, file, ctx)). The client never selects one. A processor whose import fails (the `files` extra is not installed)
 is skipped and reported on stderr."""
 
 import sys

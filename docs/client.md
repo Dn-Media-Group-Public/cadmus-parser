@@ -46,11 +46,11 @@ with mint(grants, lifetime=900, options=my_store_identity) as creds:   # revoked
   **no secret**) you can keep in a database; `Handle.from_dict(d, options)` restores it in another process to `revoke()` (a restored handle has no credentials:
   those exist only in the process that minted them). The context manager revokes on exit.
 - **Sweeping.** `sweep(max_age=1200, options=...)` deletes helper-created roles (named `cadmus-parser-<random>`; it touches no others) older than `max_age`
-  seconds: those a crashed consumer never revoked. Schedule it from a periodic task of your own.
+  seconds: those a crashed client never revoked. Schedule it from a periodic task of your own.
 
 ## Keeping credentials alive: `renew_loop`
 
-A long job (a video, a large archive) outlives any credential lifetime. The **consumer pushes** renewals; the wrapper never connects to the consumer.
+A long job (a video, a large archive) outlives any credential lifetime. The **client pushes** renewals; the wrapper never connects to the client.
 
 ```python
 from cadmus_parser import renew_loop
@@ -67,7 +67,7 @@ finally:
   A retry on 503 or a transient connection error is part of the loop. After a successful renewal the credential **before the previous one** is revoked (a transfer
   that began before the renewal may still be using the previous one), so roles do not pile up.
 - It stops on any non-200 answer: `loop.finished` (410) means the job is over; `loop.lost` (404, or an unreachable `owner` after the retries) means the replica and
-  the job are gone: mark the job failed, "wrapper lost". `loop.error` says why. A consumer restart kills its loops; the job then fails when its credential
+  the job are gone: mark the job failed, "wrapper lost". `loop.error` says why. A client restart kills its loops; the job then fails when its credential
   expires (resuming renewal across a restart is out of scope).
 - `rekey={grant_url: posted_url}` renames the keys of what is sent when a grant is wider than a posted URL (the wrapper matches keys against the URLs the job was
-  posted with); `on_mint(handle)` is called with every handle the loop makes, for a consumer that keeps a registry of live credentials.
+  posted with); `on_mint(handle)` is called with every handle the loop makes, for a client that keeps a registry of live credentials.
