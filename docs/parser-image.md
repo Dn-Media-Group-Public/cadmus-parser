@@ -19,6 +19,8 @@ ENTRYPOINT ["tini", "--", "/cadmus/server/entrypoint.sh"]
 - `install.sh [extras]` takes the server's extras (`s3` default, `files` = the default processors, `gcs`); the source stays in `/cadmus` for later `pip install`s.
 - Install GCS support **after** the processors: `blackboxprotobuf` (used by `files`) pins a protobuf that `gcsfs` refuses, and pip then only warns.
 - The venv must stay world-readable (`chmod -R a+rX /venv`): the parser runs as a pool uid, not as the wrapper's uid.
+- Scratch keeps every intermediate until the job ends: size `PARSE_SCRATCH` for the input plus the kept intermediates of the largest job (the per-job limits still bound it).
+  See also: [Plan: processor handoff](implemented-plans/01-processor-handoff.md)
 - `/scratch` is an anonymous volume: the scratch area is ephemeral, so a restart deletes what a crash left.
 - Sidecars are used as built by the library: `docker build -f blob-sidecar/Dockerfile .`, `docker build -f ocr-sidecar/Dockerfile .` (the library root is the context). `server/Dockerfile`
   builds a ready-made image with the default processors and their tools (the quickstart uses it).

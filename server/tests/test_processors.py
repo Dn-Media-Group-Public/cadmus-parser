@@ -78,3 +78,47 @@ def test_recursion_addresses_and_depth_cap():
     s = run([Arch("arch")], {"a.zip": b"z"})
     assert len(s.files) == 8 and "out/arch/a.zip.d/in.d.d/in.d" in s.files  # depth 0..7; the member address is joined with ".d/"
     assert [n for n in s.notes if "nested more than 8" in n]
+
+
+def test_scratch_is_kept_and_members_return_results():
+    seen = {}
+
+    class A(P):
+        def process(self, sink, file, ctx):
+            if file.depth:
+                return
+            p = os.path.join(ctx.dir(), "f.bin")
+            open(p, "wb").write(b"kept")
+            sink.put_file(f"out/a/{file.rel}", p, "a/b")
+            os.makedirs(os.path.join(ctx.work, "c"), exist_ok=True)
+            cp = os.path.join(ctx.work, "c", "x")
+            open(cp, "wb").write(b"c")
+            seen["m"] = ctx.recurse_many([(cp, "chunk-1"), (cp, "chunk-2")], synthetic=True)
+            seen["f"] = p
+
+    class B(P):
+        def process(self, sink, file, ctx):
+            sink.note("n:" + file.name)
+            sink.put_bytes(f"out/b/{file.rel}", b"y", "a/b")
+            ctx.claim()
+
+    s = run([A("a"), B("b", accept=lambda f: f.depth > 0)], {"x.bin": b"1"})
+    assert open(seen["f"], "rb").read() == b"kept" and s.files["out/a/x.bin"] == b"kept"  # source survives put_file
+    m = seen["m"]
+    assert [x.address[-1] for x in m] == ["chunk-1", "chunk-2"] and m[0].claimed_by == "b" and m[0].outputs == ["out/b/x.bin.d/chunk-1"]
+    assert s.notes == ["n:chunk-1", "n:chunk-2"]
+
+
+def test_synthetic_cap(monkeypatch):
+    monkeypatch.setattr(worker, "MAX_SYNTHETIC_MEMBERS", 1)
+
+    class A(P):
+        def process(self, sink, file, ctx):
+            if not file.depth:
+                p = os.path.join(ctx.work, "m")
+                open(p, "wb").write(b"m")
+                ctx.recurse(p, "c1", synthetic=True)
+                with pytest.raises(ValueError, match="synthetic"):
+                    ctx.recurse(p, "c2", synthetic=True)
+
+    run([A("a", accept=lambda f: not f.depth), P("b", accept=lambda f: f.depth > 0)], {"x": b"1"})

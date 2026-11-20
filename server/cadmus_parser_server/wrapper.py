@@ -47,7 +47,7 @@ HEARTBEAT, STALE = 10, 30  # seconds
 MAX_DEPTH = 8  # archive levels in index.json
 MAX_META = 2000  # bytes of one entry's `meta`, as JSON
 # the operator settings the parser process enforces (no secret): the only part of the wrapper's own environment a parser gets; PARSE_PASS_ENV adds names
-PARSER_ENV = ("MAX_PARSE_BYTES", "MAX_ARCHIVE_BYTES", "MAX_ARCHIVE_MEMBERS", "METADATA_TIMEOUT", "METADATA_MAX_MEM", "METADATA_MAX_BYTES", "OCR_TIMEOUT",
+PARSER_ENV = ("MAX_PARSE_BYTES", "MAX_ARCHIVE_BYTES", "MAX_ARCHIVE_MEMBERS", "PARSE_MEMBER_WORKERS", "MAX_SYNTHETIC_MEMBERS", "METADATA_TIMEOUT", "METADATA_MAX_MEM", "METADATA_MAX_BYTES", "OCR_TIMEOUT",
               "OCR_LANGS", "OCR_MIN_CONF", "OCR_MIN_CHARS", "OCR_DPI", "OCR_MAX_PAGES", "OCR_MAX_SIDE", "OCR_TESSERACT_TIMEOUT")
 
 

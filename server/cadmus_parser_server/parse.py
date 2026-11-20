@@ -213,6 +213,7 @@ class Members:
         keep = os.path.join(ctx.work, "keep" + os.path.splitext(file.path)[1])
         shutil.copyfile(file.path, keep)
         sink.put_file(f"original/{file.rel}", keep, _ctype(file, ctx))
+        os.unlink(keep)  # the output is a hard link to it: the next member's copy must not rewrite the same inode
 
 
 PROCESSORS = (Metadata, SizeCap, Archives, Markdown, Binary, Apk, Html, Documents, Members)

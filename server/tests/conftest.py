@@ -22,7 +22,6 @@ class MemSink(worker.Sink):
 
             def put_file(self, r, src, ctype, meta=None):
                 outer.files[r] = open(src, "rb").read()
-                os.unlink(src)
 
             def info(self, content_type=None, meta=None, size=None):
                 outer.info_by.setdefault(rel, {}).update(content_type=content_type, size=size)

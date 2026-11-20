@@ -114,6 +114,8 @@ network `<client>-parse` per client service that only that client and the parser
 | `PARSE_TRACEBACKS` | parser | `1`: tracebacks in `status.json` and error bodies |
 | `PARSE_PORT` | parser | listen port (default 8080) |
 | `REPLICA_ID` | parser | name in `owner_replica` (stack file: the task slot) |
+| `PARSE_MEMBER_WORKERS` | parser | threads of `ctx.recurse_many` (default 4) |
+| `MAX_SYNTHETIC_MEMBERS` | parser | cap of synthetic members (chunks, windows) per job (default 10000); see [processor handoff](implemented-plans/01-processor-handoff.md) |
 | `MAX_ARCHIVE_MEMBERS` | parser | cap of nested index entries per job (default 50000), also used by the `files` processor |
 | `MAX_PARSE_BYTES`, `MAX_ARCHIVE_BYTES`, `METADATA_TIMEOUT`, `METADATA_MAX_MEM`, `METADATA_MAX_BYTES`, `OCR_TIMEOUT`, `OCR_LANGS`, `OCR_MIN_CONF`, `OCR_MIN_CHARS`, `OCR_DPI`, `OCR_MAX_PAGES`, `OCR_MAX_SIDE`, `OCR_TESSERACT_TIMEOUT` | parser (forwarded) | settings of the default `files` processor |
 | `PARSE_REPLICAS`, `PARSE_MEMORY` | stack file | replicas (default 1) and memory limit per replica (default 8g) |

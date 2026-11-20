@@ -6,6 +6,8 @@ The **parser** (the process that reads untrusted bytes) is confined to **one rea
 
 - it holds no credential, no token (except one sidecar profile's, if the job asked for it), no store URL and none of the wrapper's environment (only the operator's
   processor settings from `PARSE_PASS_ENV`);
+- `put_file` hard-links the scratch file into `out/` (copy if linking fails): the parser can still write that inode until the wrapper has uploaded it, as it could write `out/` files before
+  See also: [Plan: processor handoff](implemented-plans/01-processor-handoff.md)
 - it runs as a pool uid with no capabilities (`no_new_privs`, ambient capabilities dropped), a private scratch directory it cannot escape, rlimits and a deadline
   per media class, on internal-only networks: it has no route out;
 - what it announces is validated: paths relative, no `..`, no symlinks, regular files only (`O_NOFOLLOW`), starting with a top-level directory some installed

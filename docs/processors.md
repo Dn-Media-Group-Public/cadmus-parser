@@ -62,14 +62,23 @@ class Upper:
 - `file.path` is the file on disk; `file.name` the last path element; `file.address` the input address as a list, one element per archive level
   (`["a.zip", "docs/m.pdf"]`); `file.rel` that address as one name for naming outputs (`a.zip.d/docs/m.pdf`); `file.depth` 0 for an input, more for an archive
   member; `file.size`.
-- `sink.put_bytes(rel, data, content_type, meta=None)` and `sink.put_file(rel, src, content_type, meta=None)` (moves `src`, a file in `ctx.work`, into the
-  output) write `rel`, a path below the output base starting with one of your `top_dirs` and at least one more element. `sink.info(content_type=None, meta=None,
+- `sink.put_bytes(rel, data, content_type, meta=None)` and `sink.put_file(rel, src, content_type, meta=None)` (`src`, a file in `ctx.work`, also goes to the
+  output, as a hard link; it stays in scratch) write `rel`, a path below the output base starting with one of your `top_dirs` and at least one more element. `sink.info(content_type=None, meta=None,
   size=None)` says something about the input itself (`size` counts only for archive members); `sink.note(text)` adds a note to its entry. `meta` is a small
   JSON object (at most 2000 bytes) passed through to `index.json`, e.g. `{"text": true}`. All of it is untrusted by the client: the parser may be hostile.
 - `ctx.options` is this processor's own entry of the job's `options`; `ctx.features` the feature names the job asked for (their `<PREFIX>_URL` /
-  `<PREFIX>_TOKEN` are in the environment, for the profile it named); `ctx.work` a scratch directory.
+  `<PREFIX>_TOKEN` are in the environment, for the profile it named); `ctx.work` the job's scratch directory. Scratch is
+  kept until the job ends (then wiped), so it is the handoff area: write files under `ctx.dir()` (`<work>/<processor>/<file.rel>/`, created) and later processors
+  of the same job read them. Do not rewrite in place a file you gave to `put_file` (it shares the inode with the output): write a new one. The primary,
+  fallback, last-resort pattern: a failing processor saves its salvaged attempt as `attempt.json` in its `ctx.dir()` and returns without `ctx.claim()`; the
+  next one reads it from `<work>/<first>/<file.rel>/`.
 - **Archives.** Unpack into `ctx.work` yourself and call `ctx.recurse(path, name)` for each member: the worker runs the same chain on it (as a `File` with a longer
   address, up to 8 levels) and builds the nested entries. No processor needs archive logic of its own. Respect your own bounds (bytes, members).
+  `ctx.recurse` returns a `Member` (`.address`, `.claimed_by`, `.outputs`, `.dir(processor)`). `recurse(path, name, synthetic=True)` is for a chunk or window
+  that is not a real archive member: it gets no `index.json` entry, its notes and outputs land on the nearest real ancestor's entry, and it counts against
+  `MAX_SYNTHETIC_MEMBERS` (default 10000) instead of `MAX_ARCHIVE_MEMBERS`. `ctx.recurse_many([(path, name), …], workers=4)` runs the members in a thread
+  pool, results in input order; `workers` is capped by `PARSE_MEMBER_WORKERS`, and a processor with `threadsafe = False` makes the pool serial.
+  See also: [Plan: processor handoff](implemented-plans/01-processor-handoff.md)
 
 ## Testing
 
