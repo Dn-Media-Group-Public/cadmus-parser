@@ -1,12 +1,15 @@
-"""The parser wrapper (docs/plans/parser-wrapper.md): the trusted half of the parser container. It authenticates the gateway, pulls a job's
-`original/` tree from the blob store with the job's scoped credential (through the egress proxy), runs the parser as a pool uid that
-can read nothing and authenticate to nothing, validates and uploads what the parser announces on its stdout pipe, and writes
-`index.json` and `status.json`. The parser never sees a credential or a token other than (if the job asked for OCR) one profile's.
+"""The parser wrapper: the trusted half of the parser container. It authenticates the consumer, pulls an input tree from a store with the
+consumer's credential (through the egress proxy), runs the sandboxed parser on a pool uid that can read nothing and authenticate to nothing,
+validates and uploads what the parser announces on its stdout pipe, and writes `index.json` and `status.json` under the output base. The
+parser never sees a credential or a token other than (if the job asked for a feature) one profile's.
 
-  POST /jobs/<proj>/<session>/<job>   {credentials, base_url?, features?}   -> 202 | 400 | 401 | 409 | 503
-  GET  /jobs/<proj>/<session>/<job>   header X-Credentials (JSON)           -> {status, error?}
+  POST /jobs        {input: {url, options?}, output: {url, options?}, options?, features?}  -> 202 {id, owner} | 400 | 401 | 409 | 503
+  POST /jobs/renew  {id, options: {<url>: {...}}}                                          -> 200 | 400 | 401 | 404 | 410
+  GET  /version, GET /health
 
-Runs as its own uid with CAP_SETUID/SETGID/CHOWN/KILL: pool uids are UID_BASE.. . Without CAP_SETUID (tests): one pseudo uid per slot, no setuid."""
+Every non-2xx answer has a JSON body {"error": "...", "traceback"?: "..."}. There is no GET of a job: the consumer reads status.json and
+index.json from the output base. Runs as its own uid with CAP_SETUID/SETGID/CHOWN/KILL: pool uids are UID_BASE.. . Without CAP_SETUID (tests):
+one pseudo uid per slot, no setuid."""
 
 import asyncio
 import collections
@@ -15,8 +18,9 @@ import hmac
 import json
 import logging
 import os
-import re
+import posixpath
 import resource
+import secrets
 import shutil
 import signal
 import stat
@@ -24,50 +28,72 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 
 import fsspec
 from starlette.applications import Starlette
+from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
+from cadmus_parser_server import limits as lm
+
 log = logging.getLogger("wrapper")
-UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
-FEATURES = {"ocr"}
-TOP_DIRS = {"original", "parsed", "simplified", "terse", "metadata"}  # what a parser may write; never index.json / status.json
+API_VERSION = "1"
+FEATURES = {"ocr": "OCR"}  # feature -> environment prefix: <PREFIX>_PROFILES (name -> {url, token}) here, <PREFIX>_URL/<PREFIX>_TOKEN in the parser
 LINE_MAX = 4096  # PIPE_BUF: the parser writes each record with one write
 HEARTBEAT, STALE = 10, 30  # seconds
-# the operator settings the parser process enforces (limits, no secret): the only part of the wrapper's own environment a parser gets
-PARSER_LIMIT_ENV = ("MAX_PARSE_BYTES", "MAX_ARCHIVE_BYTES", "MAX_ARCHIVE_MEMBERS", "METADATA_TIMEOUT", "METADATA_MAX_MEM", "METADATA_MAX_BYTES", "OCR_TIMEOUT",
-                     "OCR_LANGS", "OCR_MIN_CONF", "OCR_MIN_CHARS", "OCR_DPI", "OCR_MAX_PAGES", "OCR_MAX_SIDE", "OCR_TESSERACT_TIMEOUT")
+MAX_DEPTH = 8  # archive levels in index.json
+MAX_META = 2000  # bytes of one entry's `meta`, as JSON
+# the operator settings the parser process enforces (no secret): the only part of the wrapper's own environment a parser gets; PARSE_PASS_ENV adds names
+PARSER_ENV = ("MAX_PARSE_BYTES", "MAX_ARCHIVE_BYTES", "MAX_ARCHIVE_MEMBERS", "METADATA_TIMEOUT", "METADATA_MAX_MEM", "METADATA_MAX_BYTES", "OCR_TIMEOUT",
+              "OCR_LANGS", "OCR_MIN_CONF", "OCR_MIN_CHARS", "OCR_DPI", "OCR_MAX_PAGES", "OCR_MAX_SIDE", "OCR_TESSERACT_TIMEOUT")
 
 
 class ProtocolError(Exception):
     """The parser sent something no honest parser sends: the job fails and the parser is killed."""
 
 
+class JobError(Exception):
+    """The job fails with this message as it stands (no parser fault)."""
+
+
 def env_int(name: str, default: int) -> int:
     return int(os.environ.get(name) or default)
 
 
+def discover() -> set:
+    """The top-level output directories the installed processors declare, from a separate process (the wrapper imports no processor code)."""
+    out = subprocess.run([sys.executable, "-I", "-m", "cadmus_parser_server.discover"], capture_output=True, check=True, timeout=120).stdout
+    found = json.loads(out)
+    if not found["processors"]:
+        log.warning("no processor is installed: every job will leave its inputs unparsed")
+    return set(found["top_dirs"])
+
+
 class Config:
-    def __init__(self, token: str, blob_url: str, blob_options: dict | None = None, profiles: dict | None = None,
-                 scratch: str = "/scratch", uid_base: int = 20000, pool_size: int = 4, replica: str = "wrapper",
-                 job_timeout: int = 600, max_records: int = 500_000, max_bytes: int = 64 << 30, max_notes: int = 1000,
-                 parser_cmd: list | None = None, rlimit_as: int = 2 << 30, rlimit_fsize: int = 4 << 30, heartbeat: float = HEARTBEAT):
-        self.token, self.blob_url, self.blob_options, self.profiles = token, blob_url, blob_options or {}, profiles or {}
+    def __init__(self, token: str, blob_options: dict | None = None, profiles: dict | None = None, scratch: str = "/scratch", uid_base: int = 20000,
+                 pool_size: int = 4, replica: str = "wrapper", limits: dict | None = None, max_records: int = 500_000, max_notes: int = 1000,
+                 max_entries: int = 50_000, parser_cmd: list | None = None, heartbeat: float = HEARTBEAT, top_dirs=None, tracebacks: bool = False,
+                 pass_env: tuple = PARSER_ENV):
+        """`profiles`: {feature: {profile: {url, token}}}. `limits_`: PARSE_LIMITS (lm.resolve). `top_dirs`: default = what the processors declare."""
+        self.token, self.blob_options, self.profiles = token, blob_options or {}, profiles or {}
         self.scratch, self.uid_base, self.pool_size, self.replica = scratch, uid_base, pool_size, replica
-        self.job_timeout, self.max_records, self.max_bytes, self.max_notes = job_timeout, max_records, max_bytes, max_notes
+        self.limits = lm.resolve(limits)
+        self.max_records, self.max_notes, self.max_entries = max_records, max_notes, max_entries
         self.parser_cmd = parser_cmd or [sys.executable, "-I", "-u", "-m", "cadmus_parser_server.worker"]
-        self.rlimit_as, self.rlimit_fsize, self.heartbeat = rlimit_as, rlimit_fsize, heartbeat
+        self.heartbeat, self.tracebacks, self.pass_env = heartbeat, tracebacks, pass_env
+        self.top_dirs = set(top_dirs) if top_dirs is not None else None
 
     @classmethod
     def from_env(cls) -> "Config":
         e = os.environ
-        return cls(e["WRAPPER_TOKEN"], e["RESEARCH_BLOB_URL"], json.loads(e.get("PARSE_BLOB_OPTIONS") or "{}"),
-                   json.loads(e.get("OCR_PROFILES") or "{}"), e.get("PARSE_SCRATCH", "/scratch"), env_int("PARSE_UID_BASE", 20000),
-                   env_int("PARSE_POOL_SIZE", 4), e.get("REPLICA_ID") or e.get("HOSTNAME") or "wrapper", env_int("PARSE_JOB_TIMEOUT", 600),
-                   rlimit_as=env_int("PARSE_RLIMIT_AS", 6 << 30))
+        return cls(e["WRAPPER_TOKEN"], json.loads(e.get("PARSE_BLOB_OPTIONS") or "{}"),
+                   {f: json.loads(e.get(f"{p}_PROFILES") or "{}") for f, p in FEATURES.items()}, e.get("PARSE_SCRATCH", "/scratch"),
+                   env_int("PARSE_UID_BASE", 20000), env_int("PARSE_POOL_SIZE", 4), e.get("REPLICA_ID") or e.get("HOSTNAME") or "wrapper",
+                   json.loads(e.get("PARSE_LIMITS") or "{}"), max_entries=env_int("MAX_ARCHIVE_MEMBERS", 50_000),
+                   tracebacks=e.get("PARSE_TRACEBACKS") == "1", pass_env=(*PARSER_ENV, *e.get("PARSE_PASS_ENV", "").split()))
 
 
 # ---- the uid pool ---------------------------------------------------------------------------------------------
@@ -183,6 +209,7 @@ class Pool:
             return False
 
 
+
 # ---- one job --------------------------------------------------------------------------------------------------
 
 def open_nofollow(root: str, rel: str) -> tuple[int, int, str]:
@@ -200,7 +227,7 @@ def open_nofollow(root: str, rel: str) -> tuple[int, int, str]:
         raise
 
 
-def valid_rel(rel, first=TOP_DIRS) -> str:
+def valid_rel(rel, first) -> str:
     if (not isinstance(rel, str) or not rel or len(rel) > 1024 or "\0" in rel or "\\" in rel or rel.startswith("/")
             or os.path.normpath(rel) != rel or rel.split("/")[0] in ("", ".", "..") or rel.split("/")[0] not in first or "/" not in rel):
         raise ProtocolError(f"bad path {str(rel)[:80]!r}")
@@ -216,62 +243,134 @@ def drain_stderr(proc, cap: int = 64 << 10) -> None:
         n += len(line)
 
 
-class Job:
-    def __init__(self, w: "Wrapper", ref: tuple, slot: int, creds: dict, req: dict):
-        self.w, self.ref, self.slot, self.creds, self.req = w, ref, slot, creds, req
-        self.fs, root = w.fs(creds)
-        self.prefix = f"{root.rstrip('/')}/projects/{ref[0]}/data/{ref[1]}/{ref[2]}"
-        self.notes, self.marks, self.uploaded = [], set(), {}
-        self.timed_out = False
+class Index:
+    """index.json under construction: one entry per input file, recursive for archive members, built from the parser's records."""
 
+    def __init__(self, inputs: dict, max_entries: int):
+        self.files = {rel: {"size": size, "outputs": {}} for rel, size in inputs.items()}
+        self.entries, self.max_entries, self.notes = len(inputs), max_entries, []
+
+    def entry(self, address) -> dict | None:
+        """The entry of `address`, created on demand below the first element; None (and a note) past the depth or entry cap."""
+        if not (isinstance(address, list) and 0 < len(address) <= 1000 and all(isinstance(a, str) and a and len(a) <= 1024 and "\0" not in a for a in address)):
+            raise ProtocolError("bad input address")
+        if address[0] not in self.files:
+            raise ProtocolError(f"unknown input {address[0][:80]!r}")
+        if len(address) > MAX_DEPTH:
+            return self._cap(f"archives nested more than {MAX_DEPTH} deep: not listed")
+        e = self.files[address[0]]
+        for name in address[1:]:
+            members = e.setdefault("files", {})
+            if name not in members:
+                if self.entries >= self.max_entries:
+                    return self._cap(f"more than {self.max_entries} entries: the rest is not listed")
+                members[name] = {"size": 0, "outputs": {}}
+                self.entries += 1
+            e = members[name]
+        return e
+
+    def _cap(self, note: str):
+        if note not in self.notes:
+            self.notes.append(note)
+        return None
+
+
+class Side:
+    """One end of a job: a base URL and the credential for it, replaceable while the job runs (the consumer renews it)."""
+
+    def __init__(self, w: "Wrapper", url: str, options: dict):
+        self.w, self.url, self._options, self.lock = w, url, options, threading.Lock()
+
+    def set(self, options: dict) -> None:
+        with self.lock:
+            self._options = options
+
+    def fs(self):
+        """A filesystem with the newest credential and the path of the base in it; one per file transfer, never kept."""
+        with self.lock:
+            opts = self._options
+        return self.w.fs(self.url, opts)
+
+
+class Job:
+    def __init__(self, w: "Wrapper", slot: int, body: dict):
+        self.w, self.slot, self.req, self.id = w, slot, body, secrets.token_urlsafe(16)
+        self.input = Side(w, body["input"]["url"], body["input"].get("options") or {})
+        self.output = Side(w, body["output"]["url"], body["output"].get("options") or {})
+        self.key = body["output"]["url"].rstrip("/")  # the job's identity
+        self.timed_out, self.total, self.notes, self.paths, self.worker_error = False, 0, [], set(), None
+
+    # -- status --
     def write_json(self, name: str, obj) -> None:
-        with self.fs.open(f"{self.prefix}/{name}", "wb") as f:
+        fs, base = self.output.fs()
+        with fs.open(f"{base.rstrip('/')}/{name}", "wb") as f:
             f.write(json.dumps(obj).encode())
 
-    def status(self, status: str, error: str | None = None) -> None:
-        s = {"status": status, "owner_replica": self.w.cfg.replica, "updated": time.time(), **({"error": error} if error else {})}
-        self.w.remember(self.ref, s)
+    def status(self, status: str, error: str | None = None, tb: str | None = None) -> None:
+        s = {"status": status, "owner_replica": self.w.cfg.replica, "updated": time.time(), **({"error": error} if error else {}),
+             **({"traceback": tb} if error and tb and self.w.cfg.tracebacks else {})}
+        self.w.remember(self.key, s)
         with contextlib.suppress(Exception):  # a heartbeat that cannot be written must not kill the parse
             self.write_json("status.json", s)
 
     # -- steps --
-    def manifest(self) -> dict:
-        """The existing index.json: the gateway wrote it when it stored the originals (read first, so that a failed pull keeps it)."""
+    def listing(self) -> dict:
+        """{relative path: size} of everything under the input base (a single object is a one-file tree), checked against the operator's ceiling."""
+        fs, base = self.input.fs()
+        base = base.rstrip("/")
         try:
-            return json.loads(self.fs.cat_file(f"{self.prefix}/index.json"))
-        except FileNotFoundError:
-            return {"files": []}
+            found = fs.find(base, detail=True)
+        except PermissionError as e:
+            raise JobError(f"cannot list the input base: the credential needs list permission ({type(e).__name__})") from None
+        out, self.single = {}, base in found
+        if self.single:
+            out[posixpath.basename(base)] = found[base]["size"]
+        else:
+            for p, info in found.items():
+                rel = p[len(base) + 1:] if p.startswith(base + "/") else None
+                if info.get("type") != "file" or not rel or os.path.normpath(rel) != rel or rel.startswith("..") or "\0" in rel:
+                    continue
+                out[rel] = info["size"]
+        if (cap := lm.ceiling(self.w.cfg.limits, "input_mib")) and sum(out.values()) > lm.mib(cap):
+            raise JobError(f"input too big ({sum(out.values()) >> 20} MiB > {cap} MiB)")
+        return out
 
-    def pull(self, indir: str, manifest: dict) -> None:
-        """original/ -> indir/original/."""
-        base = f"{self.prefix}/original/"
-        os.makedirs(os.path.join(indir, "original"))
-        for p in self.fs.find(base.rstrip("/")):
-            rel = p[len(base):] if p.startswith(base) else None
-            if not rel or os.path.normpath(rel) != rel or rel.startswith(("/", "..")):
-                continue
-            dest = os.path.join(indir, "original", rel)
+    def pull(self, indir: str, names: dict) -> dict:
+        """The input tree -> indir/tree/; returns {rel: size} from the files as written here."""
+        sizes = {}
+        os.makedirs(os.path.join(indir, "tree"))
+        for rel in names:
+            fs, base = self.input.fs()  # per transfer: the newest credential
+            src = base.rstrip("/") if self.single else f"{base.rstrip('/')}/{rel}"
+            dest = os.path.join(indir, "tree", rel)
             os.makedirs(os.path.dirname(dest), exist_ok=True)
-            self.fs.get_file(p, dest)
-        ctypes = {e["path"][len("original/"):]: e.get("content_type") for e in manifest.get("files", []) if e["path"].startswith("original/")}
+            fs.get_file(src, dest)
+            sizes[rel] = os.lstat(dest).st_size
         with open(os.path.join(indir, "job.json"), "w") as f:
-            json.dump({"base_url": self.req.get("base_url") or "", "ctypes": ctypes}, f)
+            json.dump({"options": self.req.get("options") or {}, "features": sorted(self.req.get("features") or {})}, f)
+        return sizes
 
     def env(self, work: str) -> dict:
+        cfg = self.w.cfg
         env = {"PYTHONUNBUFFERED": "1", "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"), "HOME": work, "TMPDIR": work,
                "LANG": "C.UTF-8", "OPENBLAS_NUM_THREADS": "1", "OMP_NUM_THREADS": "1"}
-        env |= {k: os.environ[k] for k in PARSER_LIMIT_ENV if os.environ.get(k)}
-        if profile := (self.req.get("features") or {}).get("ocr"):  # only the requested profile: a job never holds another's token
-            env |= {"OCR_URL": self.w.cfg.profiles[profile]["url"], "OCR_TOKEN": self.w.cfg.profiles[profile]["token"]}
+        env |= {k: os.environ[k] for k in cfg.pass_env if os.environ.get(k)}
+        for feature, profile in (self.req.get("features") or {}).items():  # only the requested profile: a job never holds another's token
+            p, prefix = cfg.profiles[feature][profile], FEATURES[feature]
+            env |= {f"{prefix}_URL": p["url"], f"{prefix}_TOKEN": p["token"]}
         return env
 
-    def launch(self, jobdir: str, uid: int) -> subprocess.Popen:
+    def launch(self, jobdir: str, uid: int, lim: dict) -> subprocess.Popen:
         cfg = self.w.cfg
+        inf = resource.RLIM_INFINITY
 
-        def limits():
+        def val(n, scale=1):
+            return inf if not lim[n] else lm.mib(lim[n]) if scale else int(lim[n])
+
+        def limit_fn():
             # NPROC counts a uid's threads, and is per uid: meaningless when the parser shares the wrapper's uid (tests)
-            for r, v in ((resource.RLIMIT_AS, cfg.rlimit_as), *([(resource.RLIMIT_NPROC, 1024)] if self.w.pool.real else []),
-                         (resource.RLIMIT_NOFILE, 1024), (resource.RLIMIT_FSIZE, cfg.rlimit_fsize), (resource.RLIMIT_CORE, 0)):
+            for r, v in ((resource.RLIMIT_AS, val("ram_mib")), *([(resource.RLIMIT_NPROC, val("nproc", 0))] if self.w.pool.real else []),
+                         (resource.RLIMIT_NOFILE, val("nofile", 0)), (resource.RLIMIT_FSIZE, val("fsize_mib")), (resource.RLIMIT_CORE, 0)):
                 resource.setrlimit(r, (v, v))
             import ctypes
             ctypes.CDLL(None, use_errno=True).prctl(38, 1, 0, 0, 0)  # PR_SET_NO_NEW_PRIVS
@@ -280,61 +379,96 @@ class Job:
         extra = {"user": uid, "group": uid, "extra_groups": []} if self.w.pool.real else {}
         return subprocess.Popen([*cfg.parser_cmd, jobdir], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 env=self.env(os.path.join(jobdir, "work")), close_fds=True,
-                                start_new_session=True, umask=0o007, preexec_fn=limits, **extra)
+                                start_new_session=True, umask=0o007, preexec_fn=limit_fn, **extra)
 
-    def upload(self, out: str, rel: str, ctype: str) -> None:
+    def upload(self, out: str, rel: str, entry: dict, ctype: str, meta, cap: int) -> None:
         fd, dfd, name = open_nofollow(out, rel)
         try:
             st = os.fstat(fd)
             if not stat.S_ISREG(st.st_mode):
                 raise ProtocolError(f"{rel} is not a regular file")
             self.total += st.st_size  # the size comes from our own fstat, never from the record
-            if self.total > self.w.cfg.max_bytes:
+            if cap and self.total > cap:
                 raise ProtocolError("output too big")
-            with os.fdopen(fd, "rb", closefd=False) as src, self.fs.open(f"{self.prefix}/{rel}", "wb") as dst:
+            fs, base = self.output.fs()  # per transfer: the newest credential
+            with os.fdopen(fd, "rb", closefd=False) as src, fs.open(f"{base.rstrip('/')}/{rel}", "wb") as dst:
                 shutil.copyfileobj(src, dst, 1 << 20)
             os.unlink(name, dir_fd=dfd)
         finally:
             os.close(fd)
             os.close(dfd)
-        self.uploaded[rel] = {"path": rel, "size": st.st_size, "content_type": ctype}
+        entry["outputs"][rel] = {"size": st.st_size, "content_type": ctype, **({"meta": meta} if meta else {})}
 
-    def record(self, out: str, line: bytes) -> None:
+    @staticmethod
+    def _meta(meta):
+        if meta is None:
+            return None
+        if not isinstance(meta, dict) or len(json.dumps(meta)) > MAX_META:
+            raise ProtocolError("meta is not a small object")
+        return meta
+
+    @staticmethod
+    def _ctype(c):
+        return c[:200] if isinstance(c, str) and c else None
+
+    def note(self, entry: dict | None, text) -> None:
+        if not isinstance(text, str) or len(self.notes) >= self.w.cfg.max_notes:
+            return
+        self.notes.append(text)
+        text = text[:1000]
+        if entry is None:
+            self.index.notes.append(text)
+        else:
+            entry["notes"] = (entry["notes"] + "\n" if entry.get("notes") else "") + text
+
+    def record(self, out: str, line: bytes, lim: dict) -> None:
         try:
             rec = json.loads(line)
         except ValueError:
             raise ProtocolError("record is not JSON") from None
         if not isinstance(rec, dict):
             raise ProtocolError("record is not an object")
-        if "note" in rec:
-            if len(self.notes) < self.w.cfg.max_notes and isinstance(rec["note"], str):
-                self.notes.append(rec["note"][:1000])
-        elif rec.get("text") is True:
-            self.marks.add(valid_rel(rec.get("path"), {"original"}))
-        else:
-            ctype = rec.get("content_type")
-            self.upload(out, valid_rel(rec.get("path")), ctype[:200] if isinstance(ctype, str) and ctype else "application/octet-stream")
+        if "error" in rec:  # the worker could not start (a processor cycle): the reason of the failure
+            self.worker_error = str(rec["error"])[:1000]
+            return
+        if "note" in rec and "in" not in rec:  # a remark of the wrapper-level index.json
+            return self.note(None, rec["note"])
+        if "info" in rec or "note" in rec:
+            entry = self.index.entry(rec.get("in"))
+            if "note" in rec:
+                return self.note(entry, rec["note"]) if entry is not None else None
+            info = rec["info"]
+            if not isinstance(info, dict):
+                raise ProtocolError("info is not an object")
+            ctype, meta = self._ctype(info.get("content_type")), self._meta(info.get("meta"))
+            if entry is not None:
+                if ctype:
+                    entry["content_type"] = ctype
+                if meta:
+                    entry["meta"] = {**entry.get("meta", {}), **meta}
+                if len(rec["in"]) > 1 and isinstance(info.get("size"), int) and info["size"] >= 0:
+                    entry["size"] = info["size"]  # only a member's size is the processor's claim: an input's is our own
+            return
+        rel = valid_rel(rec.get("path"), self.w.top_dirs)  # an output of an input: {in, path, content_type?, meta?}
+        meta, ctype = self._meta(rec.get("meta")), self._ctype(rec.get("content_type")) or "application/octet-stream"
+        if (entry := self.index.entry(rec.get("in"))) is None:
+            return
+        if rel in self.paths:
+            return self.note(entry, f"output {rel} written twice: the later write is refused")
+        self.paths.add(rel)
+        self.upload(out, rel, entry, ctype, meta, lm.mib(lim["output_mib"]))
 
-    def finish(self, manifest: dict, error: str | None) -> None:
-        """index.json first (artefacts already uploaded stay, a failure is a note), then status.json."""
-        files = {e["path"]: e for e in manifest.get("files", [])}
-        files.update(self.uploaded)
-        for p in self.marks:
-            if p in files:
-                files[p] = {**files[p], "text": True}
-        notes = self.notes + ([f"not parsed ({error})"] if error else [])
-        manifest = {**manifest, "files": list(files.values())}
-        manifest.pop("notes", None)
-        if notes:
-            manifest["notes"] = notes
-        self.write_json("index.json", manifest)
-        self.status("failed" if error else "done", error)
+    def finish(self, error: str | None, tb: str | None = None) -> None:
+        """index.json first (artefacts already uploaded stay), then status.json."""
+        index = {"files": self.index.files, **({"notes": "\n".join(self.index.notes)} if self.index.notes else {})}
+        self.write_json("index.json", index)
+        self.status("failed" if error else "done", error, tb)
 
     def run(self) -> None:
-        w, error, manifest, proc = self.w, None, {"files": []}, None
+        w, error, tb, proc = self.w, None, None, None
         jobdir, uid = w.pool.dir(self.slot), w.pool.uid(self.slot)
         stop, beat, timer = threading.Event(), None, None
-        self.total = 0
+        self.index = Index({}, w.cfg.max_entries)
         try:
             def heartbeat():
                 while not stop.wait(w.cfg.heartbeat):
@@ -345,18 +479,24 @@ class Job:
             os.mkdir(jobdir, 0o700)
             for d in ("in", "out", "work"):
                 os.mkdir(os.path.join(jobdir, d), 0o700)
-            manifest = self.manifest()
-            self.pull(os.path.join(jobdir, "in"), manifest)
+            names = self.listing()
+            sizes = self.pull(os.path.join(jobdir, "in"), names)
+            self.index = Index(sizes, w.cfg.max_entries)
+            tree = os.path.join(jobdir, "in", "tree")
+            classes = {lm.classify(os.path.join(tree, rel), rel) for rel in sizes}
+            lim = lm.merge(w.cfg.limits, classes)
+            if lim["input_mib"] and sum(sizes.values()) > lm.mib(lim["input_mib"]):
+                raise JobError(f"input too big for its class ({sum(sizes.values()) >> 20} MiB > {lim['input_mib']} MiB)")
             if w.pool.real:
                 # list everything first and chown the job dir last: once a directory is the uid's, the wrapper cannot reach what is in it
-                paths = [jobdir] + [os.path.join(d, x) for d, dirs, names in os.walk(jobdir) for x in dirs + names]
+                paths = [jobdir] + [os.path.join(d, x) for d, dirs, names_ in os.walk(jobdir) for x in dirs + names_]
                 out = os.path.join(jobdir, "out")
                 # the wrapper has no DAC_OVERRIDE: it reaches the artefacts through its group (setgid out/, parser umask 007), nothing else of the uid's
                 os.chmod(jobdir, 0o710)  # before the chown: afterwards the wrapper is not the owner
                 os.chmod(out, 0o2770)
                 for n in reversed(paths):
                     os.lchown(n, uid, os.getegid() if n in (jobdir, out) else uid)
-            proc = self.launch(jobdir, uid)
+            proc = self.launch(jobdir, uid, lim)
             threading.Thread(target=drain_stderr, args=(proc,), daemon=True).start()
 
             def reap():  # whatever the parser left running (a setsid'ed child holding the pipe) must not outlive it: EOF would never come
@@ -371,8 +511,9 @@ class Job:
                 self.timed_out = True
                 with contextlib.suppress(ProcessLookupError, PermissionError):
                     os.killpg(proc.pid, signal.SIGKILL)
-            timer = threading.Timer(w.cfg.job_timeout, expire)
-            timer.start()
+            if lim["deadline_s"]:
+                timer = threading.Timer(lim["deadline_s"], expire)
+                timer.start()
             out, count, clean_eof = os.path.join(jobdir, "out"), 0, True
             while line := proc.stdout.readline(LINE_MAX + 1):
                 if len(line) > LINE_MAX or not line.endswith(b"\n"):
@@ -383,19 +524,21 @@ class Job:
                 count += 1
                 if count > w.cfg.max_records:
                     raise ProtocolError("too many records")
-                self.record(out, line)
+                self.record(out, line, lim)
             rc = proc.wait()
             if self.timed_out:
-                error = f"parser timed out after {w.cfg.job_timeout} s"
+                error = f"parser timed out after {lim['deadline_s']} s"
             elif rc != 0:
-                error = f"parser exited with {rc}"
+                error = f"parser exited with {rc}" + (f": {self.worker_error}" if self.worker_error else "")
             elif not clean_eof:
                 error = "parser output truncated"
         except ProtocolError as e:
             error = f"parser protocol violation: {e}"
-        except Exception as e:  # noqa: BLE001  a full disk or a pull error fails this job only
-            log.exception("job %s failed", self.ref)
-            error = f"{type(e).__name__}: {str(e)[:200]}"
+        except JobError as e:
+            error = str(e)
+        except Exception as e:  # noqa: BLE001  a full disk, a pull error or a store error fails this job only
+            log.exception("job %s failed", self.key)
+            error, tb = f"{type(e).__name__}: {str(e)[:200]}", traceback.format_exc()
         finally:
             if timer:
                 timer.cancel()
@@ -405,43 +548,67 @@ class Job:
             ok = w.pool.clean(self.slot, proc)  # after the process group is dead, before the uid is freed again
             w.pool.release(self.slot, quarantine=not ok)  # before the result: a client that re-POSTs the moment it sees `done` must find the slot free
             try:
-                self.finish(manifest, error)
+                self.finish(error, tb)
             except Exception:  # noqa: BLE001
-                log.exception("could not write the result of %s", self.ref)
+                log.exception("could not write the result of %s", self.key)
+            w.done(self)
 
 
 class Wrapper:
     def __init__(self, cfg: Config):
         self.cfg, self.pool = cfg, Pool(cfg)
-        self.memory: collections.OrderedDict = collections.OrderedDict()
+        self.top_dirs = cfg.top_dirs if cfg.top_dirs is not None else discover()
+        self.memory: collections.OrderedDict = collections.OrderedDict()  # output url -> last status
+        self.jobs: dict = {}  # id -> running Job
+        self.finished: collections.OrderedDict = collections.OrderedDict()  # ids of finished jobs, for the 410
 
-    def remember(self, ref, state: dict) -> None:
-        self.memory[ref] = state
-        self.memory.move_to_end(ref)
+    def remember(self, key: str, state: dict) -> None:
+        self.memory[key] = state
+        self.memory.move_to_end(key)
         while len(self.memory) > 1000:
             self.memory.popitem(last=False)
 
-    def fs(self, creds: dict):
+    def done(self, job: Job) -> None:
+        self.jobs.pop(job.id, None)
+        self.finished[job.id] = True
+        while len(self.finished) > 1000:
+            self.finished.popitem(last=False)
+
+    def fs(self, url: str, creds: dict):
+        """(filesystem, path of the base in it) for a URL and the options of that side, merged over the operator's. fsspec gets everything as given."""
         creds = dict(creds)
         if "gcs_access_token" in creds:  # GCS: a downscoped access token travels as a string
             from google.oauth2.credentials import Credentials
             creds["token"] = Credentials(creds.pop("gcs_access_token"))
         opts = {**self.cfg.blob_options, **creds, "skip_instance_cache": True}
-        if self.cfg.blob_url.startswith(("gs://", "gcs://")):
+        if url.startswith(("gs://", "gcs://")):
             opts["session_kwargs"] = {"trust_env": True}  # gcsfs (aiohttp) ignores HTTP(S)_PROXY, the only way out of this container, unless told to look
-        return fsspec.core.url_to_fs(self.cfg.blob_url, use_listings_cache=False, **opts)
+        return fsspec.core.url_to_fs(url, use_listings_cache=False, **opts)
 
-    def read_status(self, ref, creds: dict) -> dict:
-        s = self.memory.get(ref)
+    def read_status(self, url: str, creds: dict) -> dict:
+        key = url.rstrip("/")
+        s = self.memory.get(key)
         if s is None:
-            fs, root = self.fs(creds)
+            fs, base = self.fs(url, creds)
             try:
-                s = json.loads(fs.cat_file(f"{root.rstrip('/')}/projects/{ref[0]}/data/{ref[1]}/{ref[2]}/status.json"))
+                s = json.loads(fs.cat_file(f"{base.rstrip('/')}/status.json"))
             except FileNotFoundError:
                 return {"status": "not_started"}
         if s["status"] == "running" and time.time() - s["updated"] > STALE:
             return {"status": "failed", "error": "wrapper lost"}
-        return {k: v for k, v in s.items() if k in ("status", "error")}
+        return s
+
+
+def error(status: int, msg: str, tb: str | None = None) -> JSONResponse:
+    return JSONResponse({"error": msg, **({"traceback": tb} if tb else {})}, status)
+
+
+def side_of(body: dict, name: str):
+    s = body.get(name)
+    ok = isinstance(s, dict) and isinstance(s.get("url"), str) and s["url"] and isinstance(s.get("options") or {}, dict)
+    if not ok:
+        raise ValueError(f"{name} needs a url (and optional options object)")
+    return s
 
 
 def make_app(cfg: Config) -> Starlette:
@@ -450,58 +617,76 @@ def make_app(cfg: Config) -> Starlette:
     def denied(request: Request):
         auth = request.headers.get("authorization", "")
         if not hmac.compare_digest(auth.encode(), f"Bearer {cfg.token}".encode()):
-            return JSONResponse({"error": "unauthorized"}, 401)
-
-    def ref_of(request: Request):
-        ref = tuple(request.path_params[k] for k in ("proj", "session", "job"))
-        return ref if all(UUID_RE.match(p) for p in ref) else None
+            return error(401, "unauthorized")
 
     async def post(request: Request):
         if r := denied(request):
             return r
-        if not (ref := ref_of(request)):
-            return JSONResponse({"error": "invalid job reference"}, 400)
         try:
             body = await request.json()
-            creds, features = body["credentials"], body.get("features") or {}
-            assert isinstance(creds, dict) and isinstance(features, dict) and isinstance(body.get("base_url", ""), str)
-        except Exception:  # noqa: BLE001
-            return JSONResponse({"error": "bad request body"}, 400)
-        if set(features) - FEATURES:
-            return JSONResponse({"error": f"unknown feature {sorted(set(features) - FEATURES)[0]!r}"}, 400)
-        if "ocr" in features and features["ocr"] not in cfg.profiles:
-            return JSONResponse({"error": "unknown OCR profile"}, 400)
-        try:
-            cur = await asyncio.to_thread(w.read_status, ref, creds)  # a running job with a stale heartbeat reads as failed: restarted
+            side_of(body, "input"), side_of(body, "output")
+            features, options = body.get("features") or {}, body.get("options") or {}
+            assert isinstance(features, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in features.items())
+            assert isinstance(options, dict) and all(isinstance(v, dict) for v in options.values())
         except Exception as e:  # noqa: BLE001
-            return JSONResponse({"error": f"storage credential rejected ({type(e).__name__})"}, 400)
-        if cur["status"] == "running":
-            return JSONResponse({"error": "job is running"}, 409)
-        if (slot := w.pool.acquire()) is None:
-            return JSONResponse({"error": "no free parser"}, 503)
+            return error(400, f"bad request body ({type(e).__name__}: {str(e)[:100]})" if isinstance(e, ValueError) else "bad request body")
+        if unknown := sorted(set(features) - set(FEATURES)):
+            return error(400, f"unknown feature {unknown[0]!r}")
+        for feature, profile in features.items():
+            if profile not in cfg.profiles.get(feature, {}):
+                return error(400, f"unknown {feature} profile")
         try:
-            job = Job(w, ref, slot, creds, body)
+            cur = await asyncio.to_thread(w.read_status, body["output"]["url"], body["output"].get("options") or {})  # a stale heartbeat reads as failed: restarted
+        except Exception as e:  # noqa: BLE001
+            return error(400, f"storage credential rejected ({type(e).__name__})")
+        if cur["status"] == "running":
+            return error(409, "job is running")
+        if (slot := w.pool.acquire()) is None:
+            return error(503, "no free parser")
+        try:
+            job = Job(w, slot, body)
             await asyncio.to_thread(job.status, "running")
-        except BaseException:
+            fs, base = job.output.fs()  # the status of a job nobody can read is not a job: the output base must be writable now
+            await asyncio.to_thread(fs.cat_file, f"{base.rstrip('/')}/status.json")
+        except BaseException as e:
             w.pool.release(slot)
+            w.memory.pop(body["output"]["url"].rstrip("/"), None)
+            if isinstance(e, Exception):
+                return error(400, f"cannot write to the output base ({type(e).__name__})")
             raise
+        w.jobs[job.id] = job
         threading.Thread(target=job.run, daemon=True).start()
-        return JSONResponse({"status": "running"}, 202)
+        host, port = request.scope.get("server") or ("", 0)  # the address this request arrived on: where the consumer reaches this replica
+        return JSONResponse({"status": "running", "id": job.id, "owner": f"[{host}]:{port}" if ":" in host else f"{host}:{port}"}, 202)
 
-    async def get(request: Request):
+    async def renew(request: Request):
         if r := denied(request):
             return r
-        if not (ref := ref_of(request)):
-            return JSONResponse({"error": "invalid job reference"}, 400)
         try:
-            creds = json.loads(request.headers.get("x-credentials") or "{}")
-            return JSONResponse(await asyncio.to_thread(w.read_status, ref, creds))
-        except Exception as e:  # noqa: BLE001
-            return JSONResponse({"error": f"cannot read status ({type(e).__name__})"}, 502)
+            body = await request.json()
+            jid, options = body["id"], body["options"]
+            assert isinstance(jid, str) and isinstance(options, dict) and all(isinstance(v, dict) for v in options.values())
+        except Exception:  # noqa: BLE001
+            return error(400, "bad request body")
+        if (job := w.jobs.get(jid)) is None:
+            return error(410, "job finished") if jid in w.finished else error(404, "unknown job")
+        for url in options:
+            if url not in (job.input.url, job.output.url):
+                return error(400, "options key matches neither the input nor the output url")
+        for side in (job.input, job.output):
+            if side.url in options:
+                side.set(options[side.url])
+        return JSONResponse({"status": "renewed"})
 
-    app = Starlette(routes=[Route("/jobs/{proj}/{session}/{job}", post, methods=["POST"]),
-                            Route("/jobs/{proj}/{session}/{job}", get, methods=["GET"]),
-                            Route("/health", lambda r: JSONResponse({"ok": True}))])
+    async def failure(request: Request, exc: Exception):
+        if isinstance(exc, HTTPException):
+            return error(exc.status_code, exc.detail)
+        log.exception("unhandled error")
+        return error(500, f"{type(exc).__name__}: {str(exc)[:200]}", traceback.format_exc() if cfg.tracebacks else None)
+
+    app = Starlette(routes=[Route("/jobs", post, methods=["POST"]), Route("/jobs/renew", renew, methods=["POST"]),
+                            Route("/version", lambda r: JSONResponse({"api": API_VERSION})), Route("/health", lambda r: JSONResponse({"ok": True}))],
+                    exception_handlers={HTTPException: failure, Exception: failure})
     app.state.wrapper = w
     return app
 
