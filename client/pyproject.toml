@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cadmus-parser"
+version = "0.1.0"
+description = "cadmus-parser client: post jobs to the parser wrapper, read their status and index from the store, mint and renew job-scoped store credentials"
+requires-python = ">=3.11"
+dependencies = ["httpx", "fsspec"]
+
+[project.optional-dependencies]
+mint-s3 = ["boto3"]
+mint-gcs = ["google-auth"]
+test = ["pytest", "boto3", "google-auth", "starlette", "uvicorn"]
+
+[tool.setuptools.packages.find]
+include = ["cadmus_parser*"]

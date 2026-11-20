@@ -1,0 +1,165 @@
+"""The client against a real wrapper (cadmus-parser-server, `file://` stores, stand-in parsers): post, wait with the heartbeat rule, index, renew, renew_loop."""
+
+import json
+import os
+import socket
+import sys
+import tempfile
+import threading
+import time
+
+import httpx
+import pytest
+
+pytest.importorskip("cadmus_parser_server")
+import uvicorn
+
+from cadmus_parser import Client, ParseError, RenewLoop, renew_loop
+from cadmus_parser_server import wrapper
+
+TOKEN = "t0k"
+TOP = {"parsed"}
+
+
+def script(code):
+    return [sys.executable, "-I", "-u", "-c", "import os, sys, json, time\njobdir = sys.argv[1]\n" + code]
+
+
+class Svc:
+    def __init__(self, **cfg):
+        cfg.setdefault("blob_options", {"auto_mkdir": True})
+        self.cfg = wrapper.Config(TOKEN, scratch=tempfile.mkdtemp(), pool_size=2, top_dirs=TOP, **cfg)
+        s = socket.socket()
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+        s.close()
+        self.server = uvicorn.Server(uvicorn.Config(wrapper.make_app(self.cfg), host="127.0.0.1", port=port, log_level="warning"))
+        threading.Thread(target=self.server.run, daemon=True).start()
+        while not self.server.started:
+            time.sleep(0.05)
+        self.client = Client(f"http://127.0.0.1:{port}", TOKEN)
+        self.root = tempfile.mkdtemp()
+        os.makedirs(f"{self.root}/in")
+        open(f"{self.root}/in/a.md", "w").write("# a")
+        self.input, self.output = f"file://{self.root}/in", f"file://{self.root}/out"
+
+
+@pytest.fixture
+def svc():
+    made = []
+
+    def make(code="pass", **cfg):
+        made.append(Svc(parser_cmd=script("os.makedirs(jobdir + '/out/parsed', exist_ok=True)\n" + code), **cfg))
+        return made[-1]
+    yield make
+    for s in made:
+        s.server.should_exit = True
+
+
+def test_post_wait_index_and_errors(svc):
+    s = svc("os.write(1, json.dumps({'in': ['a.md'], 'note': 'hi'}).encode() + b'\\n')")
+    assert s.client.status(s.output) == {"status": "not_started"}
+    started = s.client.post(s.input, s.output)
+    assert started.id and started.owner.startswith("127.0.0.1:")
+    st = s.client.wait(s.output)
+    assert st["status"] == "done" and s.client.index(s.output)["files"]["a.md"]["notes"] == "hi"
+    assert s.client.index(f"file://{s.root}/none") == {"files": {}}
+    with pytest.raises(ParseError) as e:
+        Client(s.client.url, "wrong").post(s.input, s.output)
+    assert e.value.status == 401 and "unauthorized" in e.value.message
+    with pytest.raises(ParseError) as e:
+        s.client.post(s.input, s.output, features={"nope": "x"})
+    assert e.value.status == 400
+    with pytest.raises(ParseError) as e:
+        Client("http://127.0.0.1:9", TOKEN).post(s.input, s.output)
+    assert e.value.status == 0 and "unavailable" in e.value.message
+
+
+def test_failure_has_the_error_and_the_heartbeat_rule(svc):
+    s = svc("sys.exit(3)")
+    s.client.post(s.input, s.output)
+    assert s.client.wait(s.output)["error"] == "parser exited with 3"
+    os.makedirs(f"{s.root}/lost", exist_ok=True)
+    open(f"{s.root}/lost/status.json", "w").write(json.dumps({"status": "running", "owner_replica": "x", "updated": time.time() - 60}))
+    assert s.client.status(f"file://{s.root}/lost") == {"status": "failed", "error": "wrapper lost"}
+    assert s.client.wait(f"file://{s.root}/lost", poll_timeout=5)["error"] == "wrapper lost"
+    assert s.client.wait(f"file://{s.root}/never", poll_timeout=0.3) == {"status": "failed", "error": "timed out waiting for the parser"}
+
+
+def test_a_503_is_retried_once(svc, monkeypatch):
+    s = svc()
+    calls, real = [], httpx.post
+
+    def post(url, **kw):
+        calls.append(url)
+        if len(calls) == 1:
+            return httpx.Response(503, json={"error": "no free parser"})
+        return real(url, **kw)
+    monkeypatch.setattr(httpx, "post", post)
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+    assert s.client.post(s.input, s.output).id and len(calls) == 2
+
+
+def test_renew_codes(svc):
+    s = svc("time.sleep(1)")
+    st = s.client.post(s.input, s.output)
+    assert s.client.renew(st.owner, st.id, {s.output: {}}) == 200
+    assert s.client.renew(st.owner, "nope", {}) == 404
+    s.client.wait(s.output)
+    deadline = time.time() + 5
+    while s.client.renew(st.owner, st.id, {}) != 410 and time.time() < deadline:
+        time.sleep(0.05)
+    assert s.client.renew(st.owner, st.id, {}) == 410
+
+
+class FakeHandle(dict):
+    n = 0
+
+    def __init__(self, grants):
+        super().__init__({u: {"n": FakeHandle.n} for u, _ in grants})
+        FakeHandle.n += 1
+        self.revoked = False
+
+    def revoke(self):
+        self.revoked = True
+
+
+def test_renew_loop_pushes_fresh_credentials_and_revokes_old_ones(svc, monkeypatch):
+    from cadmus_parser import renew
+    s = svc("time.sleep(2)", heartbeat=0.2)
+    sent, minted = [], []
+    monkeypatch.setattr(renew, "mint", lambda grants, lifetime, options: minted.append(FakeHandle(grants)) or minted[-1])
+    real = s.client.renew
+    s.client.renew = lambda owner, jid, creds: (sent.append(dict(creds)), real(owner, jid, creds))[1]
+    grants = [(s.input, "read"), (s.output, "write")]
+    first = FakeHandle(grants)
+    st = s.client.post(s.input, s.output, first)
+    loop = renew_loop(s.client, grants, st.id, st.owner, first, interval=0.2)
+    time.sleep(1.0)
+    assert len(sent) >= 3 and not loop.lost and not loop.finished
+    assert first.revoked and not minted[-1].revoked and not minted[-2].revoked  # the last two stay: a transfer may still use the one before
+    assert sent[-1][s.output] == {"n": minted[-1][s.output]["n"]}
+    loop.stop()
+    assert all(h.revoked for h in minted) and loop.handles == []
+    s.client.wait(s.output)
+
+
+def test_renew_loop_stops_when_the_job_is_finished_or_lost(svc, monkeypatch):
+    from cadmus_parser import renew
+    s = svc()
+    monkeypatch.setattr(renew, "mint", lambda grants, lifetime, options: FakeHandle(grants))
+    st = s.client.post(s.input, s.output)
+    s.client.wait(s.output)
+    time.sleep(0.2)
+    loop = RenewLoop(s.client, [(s.output, "write")], st.id, st.owner, interval=0.05)
+    deadline = time.time() + 5
+    while not loop.finished and time.time() < deadline:
+        time.sleep(0.05)
+    assert loop.finished and not loop.lost
+    loop.stop()
+    gone = RenewLoop(s.client, [(s.output, "write")], st.id, "127.0.0.1:9", interval=0.05, retries=1, retry_delay=0.01)
+    deadline = time.time() + 5
+    while not gone.lost and time.time() < deadline:
+        time.sleep(0.05)
+    assert gone.lost  # a persistent connection error means the replica is gone
+    gone.stop()
