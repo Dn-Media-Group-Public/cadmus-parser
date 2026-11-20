@@ -47,11 +47,11 @@ VOLUME /scratch
 ENTRYPOINT ["tini", "--", "/cadmus/server/entrypoint.sh"]
 ```
 
-`docker build -t myorg-parser:local -f parser/Dockerfile .` (see [How to build a consumer image](consumer-image.md)).
+`docker build -t myorg-parser:local -f parser/Dockerfile .` (see [How to build the parser image](parser-image.md)).
 
 ## 3. The stack
 
-`app` is your service (any image with `pip install ./client`); it only needs `PARSE_URL` and `PARSE_TOKEN`, which the overlay adds.
+`app` is your service (its image: `ADD lib/cadmus-parser /cadmus` and `RUN pip install /cadmus/client`, see [How to build a consumer image](consumer-image.md)); it only needs `PARSE_URL` and `PARSE_TOKEN`, which the overlay adds.
 
 ```sh
 pip install ./lib/cadmus-parser/server

@@ -59,7 +59,7 @@ The adversary is **the file, and so the parser** that reads it. The consumer (yo
 
 - [Quickstart](docs/quickstart.md): a minimal consumer stack and a toy processor, end to end
 - [Reference](docs/reference.md): wrapper HTTP API, `index.json`, processor entry point, stack file, environment variables, `PARSE_LIMITS`
-- [How to write a processor](docs/processors.md) · [How to build a consumer image](docs/consumer-image.md) · [How to write a sidecar](docs/sidecar-protocol.md)
+- [How to write a processor](docs/processors.md) · [How to build a consumer image](docs/consumer-image.md) · [the parser image](docs/parser-image.md) · [How to write a sidecar](docs/sidecar-protocol.md)
 - [Client and credential minting](docs/client.md)
 - [Security guide](docs/security.md) · [Versioning and upgrades](docs/versioning.md)
 
