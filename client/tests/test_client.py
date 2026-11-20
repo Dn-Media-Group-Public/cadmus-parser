@@ -28,7 +28,7 @@ def script(code):
 class Svc:
     def __init__(self, **cfg):
         cfg.setdefault("blob_options", {"auto_mkdir": True})
-        self.cfg = wrapper.Config(TOKEN, scratch=tempfile.mkdtemp(), pool_size=2, top_dirs=TOP, **cfg)
+        self.cfg = wrapper.Config(TOKEN, scratch=tempfile.mkdtemp(), pool_size=cfg.pop("pool_size", 2), top_dirs=TOP, **cfg)
         s = socket.socket()
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
@@ -229,3 +229,28 @@ def test_renew_rekey_may_name_both_posted_urls(svc):
     seen.clear()
     assert s.client.renew(st.owner, st.id, {"g": {"k": 1}, "unused": {"k": 2}}, {"g": [s.output], "unused": []}) in (200, 410)  # an uncovered grant is dropped, not a 400
     s.client.wait(s.output)
+
+
+def test_one_shared_thread_serves_every_job_and_ends_with_the_last(svc, monkeypatch):
+    from cadmus_parser import renew
+    s = svc("time.sleep(1.5)", heartbeat=0.2, pool_size=3)
+    monkeypatch.setattr(renew, "mint", lambda grants, lifetime, options: FakeHandle(grants))
+    before = {t.ident for t in threading.enumerate()}
+    jobs = []
+    for i in range(3):
+        root = tempfile.mkdtemp()
+        os.makedirs(f"{root}/in")
+        i_url, o_url = f"file://{root}/in", f"file://{root}/out"
+        st = s.client.post(i_url, o_url)
+        jobs.append((renew_loop(s.client, [(o_url, "write")], st.id, st.owner, FakeHandle([(o_url, "write")]), interval=0.1), o_url))
+    time.sleep(0.5)
+    new = [t for t in threading.enumerate() if t.ident not in before and t.name == "cadmus-renew"]
+    assert len(new) == 1  # three jobs, one thread
+    assert all(len(lp.handles) >= 2 for lp, _ in jobs)  # each was renewed
+    for lp, o_url in jobs:
+        s.client.wait(o_url)
+        lp.stop()
+    deadline = time.time() + 5
+    while any(t.name == "cadmus-renew" and t.ident not in before for t in threading.enumerate()) and time.time() < deadline:
+        time.sleep(0.05)
+    assert not [t for t in threading.enumerate() if t.name == "cadmus-renew" and t.ident not in before]  # the last job stopped: the thread is gone

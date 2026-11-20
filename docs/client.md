@@ -79,6 +79,7 @@ finally:
     loop.stop()      # stops the pushes, revokes everything the loop minted and `first`
 ```
 
+- **One shared thread serves every running job** (it starts with the first `renew_loop` and ends with the last `stop()`); a renewal blocks it for the length of its HTTP call.
 - Every `interval` seconds (well under half the lifetime) it mints new credentials and sends them with `POST /jobs/renew` to the `owner` address from the 202.
   A retry on 503 or a transient connection error is part of the loop. After a successful renewal the credential **before the previous one** is revoked (a transfer
   that began before the renewal may still be using the previous one), so roles do not pile up.
