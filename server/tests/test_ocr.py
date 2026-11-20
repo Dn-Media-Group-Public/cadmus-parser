@@ -1,6 +1,7 @@
 """OCR (docs/implemented-plans/ocr-hybrid.md). pytesseract and the sidecar are faked: no binary, no network."""
 
 import io
+import os
 
 import pytest
 
@@ -88,3 +89,40 @@ def test_pdf_only_scanned_page_is_ocrd(monkeypatch):
     n = []
     ocr.maybe_ocr(b.getvalue(), "d.pdf", "application/pdf", "md", n.append)
     assert n == ["d.pdf: ocr stopped at page 0"]
+
+
+@pytest.mark.skipif(not os.path.isdir(os.path.join(os.path.dirname(__file__), "..", "..", "ocr-sidecar")), reason="ocr-sidecar/ not next to server/")
+def test_ocr_client_talks_to_the_sidecar(monkeypatch):
+    """ocr.py against the real sidecar app (upstream faked), with the variables the wrapper would hand a parser: the common sidecar protocol."""
+    import socket
+    import sys
+    import threading
+    import time
+
+    import httpx
+    import uvicorn
+
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "ocr-sidecar"))
+    import app as sidecar
+
+    prof = {"p": {"token": "tk", "base_url": "http://up/v1", "model": "m"}}
+    up = httpx.MockTransport(lambda r: httpx.Response(200, json={"choices": [{"message": {"content": "OCR text"}}]}))
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    srv = uvicorn.Server(uvicorn.Config(sidecar.make_app(prof, transport=up), host="127.0.0.1", port=port, log_level="warning"))
+    threading.Thread(target=srv.run, daemon=True).start()
+    while not srv.started:
+        time.sleep(0.05)
+    try:
+        monkeypatch.delenv("OCR_URL", raising=False)
+        assert not ocr.enabled()
+        monkeypatch.setenv("OCR_URL", f"http://127.0.0.1:{port}")
+        monkeypatch.setenv("OCR_TOKEN", "tk")
+        assert ocr.enabled() and ocr.remote_ocr(b"\x89PNG") == "OCR text"
+        monkeypatch.setenv("OCR_TOKEN", "other")
+        with pytest.raises(Exception):
+            ocr.remote_ocr(b"\x89PNG")
+    finally:
+        srv.should_exit = True

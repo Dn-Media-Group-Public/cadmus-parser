@@ -1,8 +1,9 @@
-"""The OCR sidecar (docs/plans/parser-wrapper.md, "Remote OCR"): a stateless forwarder. POST /ocr with image bytes (PNG/JPEG, already
-downscaled by the parser) and `Authorization: Bearer <profile token>`; the image goes to that profile's OpenAI-compatible endpoint, the
-transcript comes back. It takes no URL and no path, has no blob access and never decodes an image. The token picks the profile, so a
-parser can only reach the profile its job was given. OCR_PROFILES: {name: {token, base_url, model, auth: none|bearer|google, api_key?,
-audience?, prompt?}} (JSON)."""
+"""The OCR sidecar: a stateless forwarder speaking the common sidecar protocol (docs/sidecar-protocol.md). POST /process with the image as the
+body (PNG/JPEG, already downscaled by the parser), `Content-Type` its type and `Authorization: Bearer <profile token>`; the image goes to that
+profile's OpenAI-compatible endpoint and the transcript comes back as the `text/plain` body. It forwards no request header, takes no URL and no
+path, has no blob access and never decodes an image. The token picks the profile, so a parser can only reach the profile its job was given.
+Errors are JSON `{"error": "..."}` with standard status codes (401, 413, 415, 502, 503). OCR_PROFILES: {name: {token, base_url, model,
+auth: none|bearer|google, api_key?, audience?, prompt?}} (JSON)."""
 
 import asyncio
 import base64
@@ -13,7 +14,7 @@ import os
 import httpx
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, PlainTextResponse
 from starlette.routing import Route
 
 IMAGE_TYPES = ("image/png", "image/jpeg")
@@ -44,7 +45,7 @@ async def upstream_headers(p: dict) -> dict:
 def make_app(profiles: dict, max_body: int = 10 << 20, max_concurrent: int = 4, timeout: float = 120, transport=None) -> Starlette:
     busy = asyncio.Semaphore(max_concurrent)
 
-    async def ocr(request: Request):
+    async def process(request: Request):
         p = profile_for(profiles, request.headers.get("authorization", ""))
         if p is None:
             return JSONResponse({"error": "unauthorized"}, 401)
@@ -68,11 +69,11 @@ def make_app(profiles: dict, max_body: int = 10 << 20, max_concurrent: int = 4, 
                     r = await c.post(p["base_url"].rstrip("/") + "/chat/completions", headers=await upstream_headers(p),
                                      json={"model": p["model"], "messages": [msg], "temperature": 0})
                     r.raise_for_status()
-                    return JSONResponse({"text": r.json()["choices"][0]["message"]["content"] or ""})
+                    return PlainTextResponse(r.json()["choices"][0]["message"]["content"] or "")
             except Exception as e:  # noqa: BLE001  the parser keeps its Tesseract text and notes why
                 return JSONResponse({"error": f"upstream failed ({type(e).__name__})"}, 502)
 
-    return Starlette(routes=[Route("/ocr", ocr, methods=["POST"]), Route("/health", lambda r: JSONResponse({"ok": True}))])
+    return Starlette(routes=[Route("/process", process, methods=["POST"]), Route("/health", lambda r: JSONResponse({"ok": True}))])
 
 
 def app_from_env() -> Starlette:

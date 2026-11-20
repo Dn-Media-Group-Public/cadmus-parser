@@ -2,12 +2,13 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "common"))
 import egress_rules  # noqa: E402
 import start  # noqa: E402
 
 
 def test_rules():
-    flat = [" ".join(c) for c in egress_rules.rules(13, ["127.0.0.11", "10.1.2.3"], [("10.9.9.9", 8333)])]
+    flat = [" ".join(c) for c in egress_rules.public_rules(13, ["127.0.0.11", "10.1.2.3"], [("10.9.9.9", 8333)])]
     own = "-m owner --uid-owner 13"
     for ns in ("127.0.0.11", "10.1.2.3"):
         for p in ("udp", "tcp"):
@@ -19,7 +20,7 @@ def test_rules():
     assert allow < min(rejects)  # ... before the rejects, which are not weakened
     assert max(rejects) < flat.index(f"iptables -A OUTPUT {own} -j ACCEPT") < flat.index(f"ip6tables -A OUTPUT {own} -j REJECT")
     assert not any("-d 10.0.0.0/8 -j ACCEPT" in f for f in flat)
-    assert flat[0] == "iptables -F OUTPUT" and not [f for f in egress_rules.rules(13, [], []) if "--dport 8333" in " ".join(f)]
+    assert flat[0] == "iptables -F OUTPUT" and not [f for f in egress_rules.public_rules(13, [], []) if "--dport 8333" in " ".join(f)]
 
 
 def test_passwd_line_is_apr1():

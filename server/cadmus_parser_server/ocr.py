@@ -3,7 +3,6 @@ The wrapper puts OCR_URL and OCR_TOKEN in the environment only when the job aske
 no remote code path. A failure (sidecar down, timeout, token or endpoint error) never fails the parse: Tesseract's text is kept and noted."""
 
 import io
-import json
 import os
 import urllib.request
 
@@ -24,10 +23,10 @@ def enabled() -> bool:
 
 def remote_ocr(image: bytes, content_type: str = "image/png") -> str:
     """Transcript of a PNG/JPEG (already downscaled) from the profile this job was given. Raises on any failure."""
-    req = urllib.request.Request(os.environ["OCR_URL"].rstrip("/") + "/ocr", data=image, method="POST",
+    req = urllib.request.Request(os.environ["OCR_URL"].rstrip("/") + "/process", data=image, method="POST",
                                  headers={"Authorization": f"Bearer {os.environ['OCR_TOKEN']}", "Content-Type": content_type})
     with urllib.request.urlopen(req, timeout=TIMEOUT) as r:  # a proxy variable in the environment would not be honoured here: there is none
-        return json.loads(r.read())["text"]
+        return r.read().decode("utf-8", "replace")  # the sidecar protocol: the transcript is the text/plain response body
 
 
 def _tesseract(img) -> tuple[str, float]:

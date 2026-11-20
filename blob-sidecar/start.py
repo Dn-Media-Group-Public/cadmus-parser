@@ -7,7 +7,8 @@ import socket
 import subprocess
 import sys
 
-sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.dirname(__file__))  # the image has egress_rules.py beside this file; a checkout has it in ../common
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "common"))
 import egress_rules  # noqa: E402
 
 CONF = """http_port 3128
@@ -47,7 +48,7 @@ def main() -> None:
     token = os.environ["PROXY_TOKEN"]
     proxy = pwd.getpwnam("proxy")
     allow = [(resolve(h), int(p)) for h, p in (a.rsplit(":", 1) for a in os.environ.get("PARSE_PROXY_ALLOW", "").split())]
-    for cmd in egress_rules.rules(proxy.pw_uid, resolvers(), allow):
+    for cmd in egress_rules.public_rules(proxy.pw_uid, resolvers(), allow):
         subprocess.run(cmd, check=True)
     os.makedirs("/etc/squid", exist_ok=True)
     with open("/etc/squid/passwd", "w") as f:

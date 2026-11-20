@@ -8,7 +8,8 @@ import socket
 import subprocess
 import sys
 
-sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.dirname(__file__))  # the image has egress_rules.py beside this file; a checkout has it in ../common
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "common"))
 import egress_rules  # noqa: E402
 
 
@@ -16,7 +17,7 @@ def main() -> None:
     ocr = pwd.getpwnam("ocr")
     ns = [p[1] for p in (l.split() for l in open("/etc/resolv.conf")) if len(p) > 1 and p[0] == "nameserver" and p[1].replace(".", "").isdigit()]
     eps = egress_rules.endpoints(json.loads(os.environ["OCR_PROFILES"]), lambda h: socket.getaddrinfo(h, None, socket.AF_INET)[0][4][0])
-    for cmd in egress_rules.rules(ocr.pw_uid, ns, eps):
+    for cmd in egress_rules.pinned_rules(ocr.pw_uid, ns, eps):
         subprocess.run(cmd, check=True)
     os.execvp("setpriv", ["setpriv", "--no-new-privs", f"--reuid={ocr.pw_uid}", f"--regid={ocr.pw_gid}", "--clear-groups",
                           "--bounding-set=-all", "--inh-caps=-all", "uvicorn", "app:app_from_env", "--factory", "--app-dir", "/app",
