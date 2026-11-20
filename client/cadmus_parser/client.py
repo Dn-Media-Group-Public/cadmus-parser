@@ -82,8 +82,11 @@ class Client:
     def renew(self, owner: str, job_id: str, creds: Mapping, rekey: Mapping | None = None) -> int:
         """POST /jobs/renew to the replica that owns the job: 200 renewed, 404 unknown (the replica is gone), 410 finished. Returns the status code;
         raises httpx.TransportError when the replica cannot be reached. The wrapper matches the keys against the urls the job was posted with:
-        `rekey` = {grant url: posted url} renames the keys of `creds` when a grant was wider than a posted url."""
-        options = {(rekey or {}).get(url, url): wire(o) for url, o in creds.items()}
+        `rekey` = {grant url: posted url (or a list of them)} renames the keys of `creds` when a grant was wider than a posted url, or covers both."""
+        options = {}
+        for url, o in creds.items():
+            for target in (lambda t: [t] if isinstance(t, str) else t)((rekey or {}).get(url, url)):
+                options[target] = wire(o)
         return httpx.post(f"http://{owner}/jobs/renew", json={"id": job_id, "options": options}, headers=self._head, timeout=self.timeout).status_code
 
     def read(self, base_url: str, name: str, options=None) -> bytes:
@@ -140,7 +143,10 @@ class Client:
         try:
             gi, go = _grant_for(h, input_url), _grant_for(h, output_url)
             started = self.post(input_url, output_url, input_options=h[gi], output_options=h[go], options=options, features=features)
-            rekey = {g: u for g, u in ((gi, input_url), (go, output_url)) if g != u}
+            targets: dict = {}
+            for g, u in ((gi, input_url), (go, output_url)):
+                targets.setdefault(g, []).append(u)  # one grant may cover both posted urls
+            rekey = {g: us for g, us in targets.items() if us != [g]}
             loop = renew_loop(self, grants, started.id, started.owner, h, interval=renew_every, lifetime=lifetime, options=mint_options, rekey=rekey, on_mint=on_mint)
             status = self.wait(output_url, lambda: loop.current[go], poll_timeout)
             return status, self.index(output_url, loop.current[go])

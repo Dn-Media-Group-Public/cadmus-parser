@@ -208,3 +208,22 @@ def test_run_is_the_whole_job_and_handles_wide_grants(svc, monkeypatch):
     with pytest.raises(ParseError):
         Client(s.client.url, "wrong").run(s.input, s.output)
     assert all(h.revoked for h in made)
+
+
+def test_renew_rekey_may_name_both_posted_urls(svc):
+    s = svc("time.sleep(1)", heartbeat=0.2)
+    seen = {}
+    st = s.client.post(s.input, s.output)
+    import httpx as hx
+    real = hx.post
+    def spy(url, **kw):
+        if url.endswith("/jobs/renew"):
+            seen.update(kw["json"]["options"])
+        return real(url, **kw)
+    hx.post = spy
+    try:
+        assert s.client.renew(st.owner, st.id, {"g": {"k": 1}}, {"g": [s.input, s.output]}) == 200
+    finally:
+        hx.post = real
+    assert seen == {s.input: {"k": 1}, s.output: {"k": 1}}
+    s.client.wait(s.output)
