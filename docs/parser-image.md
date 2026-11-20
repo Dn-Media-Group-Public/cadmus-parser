@@ -16,6 +16,8 @@ EXPOSE 8080
 ENTRYPOINT ["tini", "--", "/cadmus/server/entrypoint.sh"]
 ```
 
+- `media-decode` (in `files`) needs `ffmpeg` with libx264 and libopus (Debian's has both) and installs `pillow-heif` (HEIC; a wheel that bundles libheif).
+  See also: [Plan: media decode](implemented-plans/02-media-decode.md)
 - `install.sh [extras]` takes the server's extras (`s3` default, `files` = the default processors, `gcs`); the source stays in `/cadmus` for later `pip install`s.
 - Install GCS support **after** the processors: `blackboxprotobuf` (used by `files`) pins a protobuf that `gcsfs` refuses, and pip then only warns.
 - The venv must stay world-readable (`chmod -R a+rX /venv`): the parser runs as a pool uid, not as the wrapper's uid.

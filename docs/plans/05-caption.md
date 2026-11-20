@@ -1,6 +1,6 @@
 # Plan: Caption (image-to-text)
 
-> **Status: draft.** Depends on [processor-handoff](01-processor-handoff.md), [media-decode](02-media-decode.md) and [sidecar-usage-reporting](03-sidecar-usage-reporting.md); shares `modelcheck.py` and the primary/fallback pattern with [asr](04-asr.md).
+> **Status: draft.** Depends on [processor-handoff](01-processor-handoff.md), [media-decode](../implemented-plans/02-media-decode.md) and [sidecar-usage-reporting](03-sidecar-usage-reporting.md); shares `modelcheck.py` and the primary/fallback pattern with [asr](04-asr.md).
 
 ## Problem / Goal
 

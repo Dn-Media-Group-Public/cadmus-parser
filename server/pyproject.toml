@@ -15,7 +15,7 @@ s3 = ["s3fs[boto3]>=2024.1"]
 gcs = ["gcsfs", "google-auth"]
 # the default `files` processor (markitdown, trafilatura, archives, decoders, metadata, OCR); without it no processor is installed
 files = ["trafilatura", "markitdown[all]", "python-multipart", "lxml_html_clean", "markdown-it-py", "linkify-it-py", "msgpack", "cbor2", "bson",
-         "py7zr", "rarfile", "blackboxprotobuf", "pyyaml", "rasterio", "pyogrio", "lxml", "pypdf", "pytesseract", "pypdfium2", "Pillow"]
+         "py7zr", "rarfile", "blackboxprotobuf", "pyyaml", "rasterio", "pyogrio", "lxml", "pypdf", "pytesseract", "pypdfium2", "Pillow", "pillow-heif"]
 test = ["pytest", "httpx"]
 
 [project.entry-points."cadmus_parser.processors"]
@@ -28,6 +28,7 @@ apk = "cadmus_parser_server.parse:Apk"
 html = "cadmus_parser_server.parse:Html"
 documents = "cadmus_parser_server.parse:Documents"
 members = "cadmus_parser_server.parse:Members"
+media-decode = "cadmus_parser_server.media_decode:MediaDecode"
 
 [tool.setuptools.packages.find]
 include = ["cadmus_parser_server*"]

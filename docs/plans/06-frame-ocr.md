@@ -1,11 +1,11 @@
 # Plan: Frame OCR
 
-> **Status: draft.** Depends on [processor-handoff](01-processor-handoff.md) and [media-decode](02-media-decode.md).
+> **Status: draft.** Depends on [processor-handoff](01-processor-handoff.md) and [media-decode](../implemented-plans/02-media-decode.md).
 
 ## Problem / Goal
 
 Cadmus OCRs images and scanned PDF pages (Tesseract first, a remote multimodal model through `ocr-sidecar` as fallback) but not the frames of a video. Text in
-video (signs, lower-thirds, slides, documents on screen) is lost. [media-decode](02-media-decode.md) writes frame files cheap to read, which is what this plan consumes.
+video (signs, lower-thirds, slides, documents on screen) is lost. [media-decode](../implemented-plans/02-media-decode.md) writes frame files cheap to read, which is what this plan consumes.
 
 Goal: a `frame-ocr` processor that runs the existing OCR engine over a video's frames and writes timestamped text.
 

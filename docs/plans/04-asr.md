@@ -1,6 +1,6 @@
 # Plan: ASR (transcription)
 
-> **Status: draft.** Depends on [processor-handoff](01-processor-handoff.md), [media-decode](02-media-decode.md) and [sidecar-usage-reporting](03-sidecar-usage-reporting.md).
+> **Status: draft.** Depends on [processor-handoff](01-processor-handoff.md), [media-decode](../implemented-plans/02-media-decode.md) and [sidecar-usage-reporting](03-sidecar-usage-reporting.md).
 
 ## Problem / Goal
 

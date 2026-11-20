@@ -142,6 +142,8 @@ Classes: `video`, `audio`, `image`, `document`, `archive`, `other` (plus `defaul
 | `output_mib` | total uploaded for a job, MiB; 0 = unlimited | 4096 |
 | `nproc`, `nofile` | process (thread) and open-file counts | 1024, 1024 |
 
+`media-decode` writes a frame store (a 2 h video: about 100 MB with the default `540@10`, 1 GB more for `full@0.5` at 1080p) and may need more than the `video` deadline for long videos: raise `output_mib` and `deadline_s` of `video`. Options and outputs: [media-decode](processors.md#media-decode); `media` is its `top_dirs` entry. See also: [Plan: media decode](implemented-plans/02-media-decode.md)
+
 Built-ins for `video` (3600 s, 16 GiB RAM, 16 GiB file, 20 GiB in/out), `audio` and `archive` (1800 s, 8 GiB RAM, 4 GiB input, 8 GiB output) are larger. **Every
 built-in is finite, for every class**; `0` is accepted only when the operator writes it. A class has its built-in, overridden by `default.*`, overridden by `<class>.*`.
 

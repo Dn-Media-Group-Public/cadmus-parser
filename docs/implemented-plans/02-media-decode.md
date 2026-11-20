@@ -1,6 +1,6 @@
 # Plan: Media decode
 
-> **Status: draft.** Depends on [processor-handoff](01-processor-handoff.md). Written for the article-graph consumer; general to cadmus. Open items are under "Open questions".
+> **Status: implemented.** Depends on [processor-handoff](01-processor-handoff.md). Written for the article-graph consumer; general to cadmus. Open items are under "Open questions".
 
 ## Problem / Goal
 
@@ -39,7 +39,7 @@ source is decoded once; Python then post-processes the candidates. Pure extracti
 
 ### Frame store
 
-Storage is cheap, decoding is not: later per-frame analysis (OCR in [frame-ocr](06-frame-ocr.md), face detection in a consumer) reads these files instead of
+Storage is cheap, decoding is not: later per-frame analysis (OCR in [frame-ocr](../plans/06-frame-ocr.md), face detection in a consumer) reads these files instead of
 decoding the original.
 
 - Option `frame_passes`: list of `<resolution>@<fps>`; `resolution` is the output height in pixels or `full`, `fps` a number or `full`. Default

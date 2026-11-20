@@ -28,8 +28,8 @@ processor whose import fails (an extra that is not installed) is skipped with a 
 
 ## The default processors
 
-The `files` extra installs nine, one per kind of file or library: `metadata` (ExifTool, ffprobe, GDAL, OOXML, PDF history), `sizecap`, `archives`, `markdown`, `binary`
-(msgpack, CBOR, BSON, plist, protobuf), `html` (trafilatura), `apk`, `documents` (markitdown and OCR, the fallback) and `members` (keeps unpacked archive members). They
+The `files` extra installs ten, one per kind of file or library: `metadata` (ExifTool, ffprobe, GDAL, OOXML, PDF history), `sizecap`, `archives`, `markdown`, `binary`
+(msgpack, CBOR, BSON, plist, protobuf), `html` (trafilatura), `apk`, `documents` (markitdown and OCR, the fallback) `members` (keeps unpacked archive members) and `media-decode`. `media-decode` is separate: it has its own options entry and never claims a file (see below). The others
 share the options entry `files` (`base_url`, `ctypes`, read with `ctx.options_of("files")`) and use `before`/`after` and `ctx.claim()` to hand a file to exactly one
 content handler. They are the model for splitting your own.
 
@@ -84,3 +84,17 @@ class Upper:
 
 Drive the worker's `Runner` with an in-memory sink (see `server/tests/conftest.py`: `MemSink`), or run a whole job against `file://` URLs with the wrapper
 (`server/tests/harness.py`). Settings the operator tunes reach the parser only through names listed in `PARSE_PASS_ENV`.
+
+## media-decode
+
+Decodes an image, video or audio file once (recognised by magic bytes, not name) and writes, below `media/<file.rel>/`: `thumb.jpg` (image, video), `keyframes/<n>.jpg` +
+`keyframes.json` (video; scene changes, at least one per `keyframe_max_gap_s`, none closer than `keyframe_min_gap_s`), `audio.opus` (mono 16 kHz; video with audio, audio),
+`web.mp4` / `web.m4a` / `web.png` (a browser-playable rendition, only when the original does not play; `renditions.json` says `original` otherwise), `frames/<resolution>-<fps>.mp4|.mkv`
+(video frame store, one file per `frame_passes` entry) and `decode.json`. A video is decoded by a single ffmpeg invocation with several outputs. The same files are left under
+`ctx.dir()` for processors of the same job (declare `after = ("media-decode",)`).
+
+Options (`options["media-decode"]`): `thumb_side` (320), `keyframe_scene_threshold` (0.3), `keyframe_min_gap_s` (2), `keyframe_max_gap_s` (30), `max_keyframes` (0 = no cap),
+`web_rendition` (`auto` | `off`), `web_max_height` (720), `frame_passes` (default `["540@10", "full@0.5"]`; `<height|full>@<fps|full>`; fps >= 2 is H.264, below that all-intra MJPEG; `[]` = none).
+The frame store is large (a 2 h video: about 100 MB for `540@10`, 1 GB for `full@0.5` at 1080p): raise `output_mib` and, for long videos, `deadline_s` of the `video` class in `PARSE_LIMITS`.
+Needs `ffmpeg` (with libx264 and libopus) and, for images, `Pillow` and `pillow-heif` (both in the `files` extra).
+See also: [Plan: media decode](implemented-plans/02-media-decode.md)

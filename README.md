@@ -11,6 +11,7 @@ video go in; text, outlines and structured data come out, as artefacts in your o
 - **OCR**: images and scanned PDF pages, Tesseract first, a remote multimodal model as the fallback for poor results (through a sidecar, so the parser never holds the endpoint's key)
 - **Archives** (zip, tar, tgz, 7z, rar, gz/bz2/xz) are unpacked and every member parsed, with the usual bomb and zip-slip limits
 - **Binary structured formats** (msgpack, CBOR, BSON, plist, protobuf, gRPC-web) become JSON
+- **Media decode**: image, video and audio decoded once into a thumbnail, scene-change keyframes, a 16 kHz `audio.opus`, a browser-playable rendition (when the original does not play) and a downscaled frame store for later per-frame analysis ([options](docs/processors.md#media-decode))
 - **File metadata** as YAML: EXIF/GPS, Office tracked changes and comments, GeoTIFF/GDAL and vector (GPX, KML, GeoJSON, GeoPackage, shapefile) CRS and bounds, audio/video streams and chapters, PDF edit history
 - **Your own formats**: add a processor package; processors are ordered, run per file and can recurse into archives ([how](docs/processors.md))
 
