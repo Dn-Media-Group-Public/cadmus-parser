@@ -11,10 +11,11 @@ import json
 
 
 def overlay(consumers: list[str], dev_store: str | None = None, ocr: bool = False, parser_image: str | None = None, extra_env: dict | None = None,
-            dev_store_network: str | None = None) -> dict:
+            dev_store_network: str | None = None, network_names: dict | None = None) -> dict:
     """`dev_store` = host:port of a store inside the stack that the proxy may reach (exactly that address and port); its network is `dev_store_network`
-    (default: the host name). `extra_env` = {service: {VAR: value}} merged into the consumers' environment."""
-    nets = {c: f"{c}-parse" for c in consumers}
+    (default: the host name). `extra_env` = {service: {VAR: value}} merged into the consumers' environment. `network_names` = {service: network}
+    overrides the default network name `<service>-parse`."""
+    nets = {c: (network_names or {}).get(c) or f"{c}-parse" for c in consumers}
     doc: dict = {"version": "3.8", "services": {"parser": {"networks": list(nets.values()), **({"image": parser_image} if parser_image else {})}},
                  "networks": {n: {"driver": "overlay", "internal": True} for n in nets.values()}}
     for c, n in nets.items():

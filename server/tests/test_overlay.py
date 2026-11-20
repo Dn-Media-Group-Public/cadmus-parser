@@ -18,6 +18,7 @@ def test_overlay_per_consumer_networks_env_and_optional_parts():
     assert doc["networks"] == {"a-web-parse": {"driver": "overlay", "internal": True}, "b-web-parse": {"driver": "overlay", "internal": True}}
     assert doc["services"]["blob-sidecar"] == {"networks": ["seaweedfs"], "environment": {"PARSE_PROXY_ALLOW": "seaweedfs:8333"}}
     assert doc["services"]["ocr-sidecar"]["networks"] == ["parse-ocr", "public"] and "NET_ADMIN" in doc["services"]["ocr-sidecar"]["cap_add"]
+    assert overlay.overlay(["w"], network_names={"w": "mine"})["services"]["w"]["networks"] == ["mine"]
     plain = overlay.overlay(["w"])
     assert set(plain["services"]) == {"parser", "w"} and "image" not in plain["services"]["parser"]
 
