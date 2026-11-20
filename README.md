@@ -43,7 +43,7 @@ The adversary is **the file, and so the parser** that reads it. The consumer (yo
 
 ## Tests
 
-`pip install ./server[s3,test] ./client[test] pytest-asyncio httpx` then, one process per area: `python -m pytest server`, `client`, `blob-sidecar`, `ocr-sidecar`.
+`pip install "./server[s3,files,test]" "./client[test]" pytest-asyncio httpx` then, one process per area: `python -m pytest server`, `client`, `blob-sidecar`, `ocr-sidecar`.
 The tests use `file://` stores; nothing needs a running object store.
 
 MIT licence.
