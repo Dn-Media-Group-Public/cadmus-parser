@@ -1,12 +1,6 @@
 __pycache__/
 *.pyc
-data/
-cmp_blocklist.txt
-.env
-.venv/
-.build/
 build/
 *.egg-info/
 .pytest_cache/
-*~
-.claude
+.venv/

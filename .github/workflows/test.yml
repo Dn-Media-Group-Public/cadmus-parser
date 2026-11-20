@@ -1,0 +1,12 @@
+name: test
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: sudo apt-get update && sudo apt-get install -y libimage-exiftool-perl ffmpeg
+      - run: pip install ./server[s3,test] ./client[test] pytest-asyncio httpx starlette uvicorn
+      - run: python -m pytest -q server client blob-sidecar ocr-sidecar

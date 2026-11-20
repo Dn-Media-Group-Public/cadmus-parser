@@ -8,7 +8,7 @@ version: "3.8"
 
 services:
   parser:
-    image: ${IMAGE_PREFIX:-}spider-hoarder-parser:${IMAGE_TAG:-local}   # built by deploy.sh (parser/Dockerfile)
+    image: ${IMAGE_PREFIX:-}cadmus-parser:${IMAGE_TAG:-local}   # built by deploy.sh (server/Dockerfile)
     # The wrapper keeps exactly what the uid lifecycle needs (parser/entrypoint.sh drops the rest and sets no_new_privs); SETPCAP is for that drop.
     cap_drop: [ALL]
     cap_add: [SETUID, SETGID, CHOWN, KILL, SETPCAP]
@@ -40,7 +40,7 @@ services:
     networks: [parse-egress, parse-ocr]
 
   blob-sidecar:
-    image: ${IMAGE_PREFIX:-}spider-hoarder-blob-sidecar:${IMAGE_TAG:-local}   # blob-sidecar/Dockerfile: squid 6, own egress rules
+    image: ${IMAGE_PREFIX:-}cadmus-parser-blob-sidecar:${IMAGE_TAG:-local}   # blob-sidecar/Dockerfile: squid 6, own egress rules
     cap_drop: [ALL]
     cap_add: [NET_ADMIN, SETUID, SETGID, SETPCAP, KILL]   # NET_ADMIN for the egress rules only, dropped before squid starts; KILL: tini (root) signals squid (uid proxy) on stop
     deploy: { replicas: 1, restart_policy: { condition: any } }
