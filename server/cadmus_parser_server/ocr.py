@@ -53,23 +53,30 @@ def _png(img) -> bytes:
     return out.getvalue()
 
 
-def ocr_image(img) -> tuple[str, str]:
-    """(text, how) of a PIL image: Tesseract, or the sidecar when Tesseract is below the thresholds. Never raises for OCR failures."""
+def ocr_engine(img) -> tuple[str, float | None, str, str]:
+    """(text, confidence, engine, how) of a PIL image: Tesseract, or the sidecar when Tesseract is below the thresholds. `engine` is "tesseract" | "remote" | "skipped";
+    confidence is Tesseract's mean word confidence, None for remote. Never raises for OCR failures."""
     from PIL import Image
 
     if img.width * img.height > Image.MAX_IMAGE_PIXELS:
-        return "", "skipped: image too large"
+        return "", None, "skipped", "skipped: image too large"
     try:
         text, conf = _tesseract(img)
         how = f"tesseract (conf {conf:.0f})"
     except Exception as e:  # noqa: BLE001  no binary, timeout, bad image
         text, conf, how = "", 0.0, f"tesseract failed: {type(e).__name__}"
     if (conf >= MIN_CONF and len(text.strip()) >= MIN_CHARS) or not enabled():
-        return text, how  # without a sidecar the Tesseract result is used whatever its confidence, and the note shows it
+        return text, conf, "tesseract", how  # without a sidecar the Tesseract result is used whatever its confidence, and the note shows it
     try:
-        return remote_ocr(_png(img)), "remote"
+        return remote_ocr(_png(img)), None, "remote", "remote"
     except Exception as e:  # noqa: BLE001
-        return text, f"{how}, remote failed: {type(e).__name__}"
+        return text, conf, "tesseract", f"{how}, remote failed: {type(e).__name__}"
+
+
+def ocr_image(img) -> tuple[str, str]:
+    """(text, how) of a PIL image, see ocr_engine."""
+    text, _, _, how = ocr_engine(img)
+    return text, how
 
 
 def maybe_ocr(raw: bytes, path: str, ctype: str, text: str, note) -> str:

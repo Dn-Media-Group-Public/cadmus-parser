@@ -8,7 +8,7 @@ video go in; text, outlines and structured data come out, as artefacts in your o
 - **Everything to Markdown** with [markitdown](https://github.com/microsoft/markitdown): Word, Excel, PowerPoint, PDF, EPUB, CSV, JSON, XML, plain text ...
 - **Web pages**: HTML to Markdown with main-content extraction ([trafilatura](https://trafilatura.readthedocs.io/)), links made absolute from a base URL, plus a simplified main-content view
 - **Terse outline view** of every parsed document (headings, links, images) for cheap skimming
-- **OCR**: images and scanned PDF pages, Tesseract first, a remote multimodal model as the fallback for poor results (through a sidecar, so the parser never holds the endpoint's key)
+- **OCR**: images and scanned PDF pages, Tesseract first, a remote multimodal model as the fallback for poor results (through a sidecar, so the parser never holds the endpoint's key); also the frames of a video (`frame-ocr`)
 - **Archives** (zip, tar, tgz, 7z, rar, gz/bz2/xz) are unpacked and every member parsed, with the usual bomb and zip-slip limits
 - **Binary structured formats** (msgpack, CBOR, BSON, plist, protobuf, gRPC-web) become JSON
 - **Media decode**: image, video and audio decoded once into a thumbnail, scene-change keyframes, a 16 kHz `audio.opus`, a browser-playable rendition (when the original does not play) and a downscaled frame store for later per-frame analysis ([options](docs/processors.md#media-decode))

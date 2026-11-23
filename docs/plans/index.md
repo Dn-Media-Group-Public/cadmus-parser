@@ -5,6 +5,5 @@ They were written for the article-graph consumer (its `docs/plans/cadmus-parsing
 
 | Plan | Adds | Depends on |
 |---|---|---|
-| [frame-ocr](06-frame-ocr.md) | OCR of video frames from the frame store, through the existing OCR sidecar | processor-handoff, media-decode |
 
-Implementation order: `processor-handoff` (done: [implemented](../implemented-plans/01-processor-handoff.md)) then `media-decode` (done: [implemented](../implemented-plans/02-media-decode.md)), and `sidecar-usage-reporting` (done: [implemented](../implemented-plans/03-sidecar-usage-reporting.md)), and `asr` (done: [implemented](../implemented-plans/04-asr.md)), and `caption` (done: [implemented](../implemented-plans/05-caption.md)), then `frame-ocr`.
+Implementation order: `processor-handoff` (done: [implemented](../implemented-plans/01-processor-handoff.md)) then `media-decode` (done: [implemented](../implemented-plans/02-media-decode.md)), and `sidecar-usage-reporting` (done: [implemented](../implemented-plans/03-sidecar-usage-reporting.md)), and `asr` (done: [implemented](../implemented-plans/04-asr.md)), and `caption` (done: [implemented](../implemented-plans/05-caption.md)), and `frame-ocr` (done: [implemented](../implemented-plans/06-frame-ocr.md)).

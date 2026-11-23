@@ -110,6 +110,13 @@ claims. The parent reads each chunk's `segments.json` from `member.dir(member.cl
 (`file.index_address is not None`), and the ASR processors are ordered `before` the content handlers so `documents` never sees a chunk.
 See also: [Plan: ASR](implemented-plans/04-asr.md)
 
+## frame-ocr
+
+`frame-ocr` (after `media-decode`, `before` the content handlers; see [reference](reference.md#frame-ocr)) runs only for a video when the job asked for the `ocr` feature. It picks one
+frame pass from `decode.json`, has ffmpeg decode it sequentially to raw grey frames, skips frames that barely differ from the last OCRed one (pure `thumb_diff`), calls the engine
+`ocr.ocr_engine` (shared with `documents`) and merges runs of near-identical text (pure `ocr_frames`). It claims nothing; its only output is `ocr.json`.
+See also: [Plan: Frame OCR](implemented-plans/06-frame-ocr.md)
+
 ## caption
 
 Four processors (`caption-split`, `caption-primary`, `caption-fallback`, `caption-skip`; see [reference](reference.md#caption)), the same shape as [asr](#asr): the parent

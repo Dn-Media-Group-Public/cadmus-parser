@@ -198,6 +198,17 @@ Known limitations: a compressed timeline goes undetected; retrying a blocked chu
 without diarization yields no speaker labels; speaker mapping across chunks depends on speech in the overlap.
 See also: [Plan: ASR](implemented-plans/04-asr.md)
 
+## Frame OCR
+
+`features: {"ocr": "<profile>"}` also turns on `frame-ocr`: the OCR engine of images and scanned PDFs (Tesseract, the OCR sidecar when the result is poor; same `OCR_*` settings) run over one
+frame pass of a video's frame store ([media-decode](implemented-plans/02-media-decode.md)). Options, `options["frame-ocr"]`: `pass` (the stem of a `frame_passes` file such as `full-0.5`; default
+the highest-resolution pass with fps <= 1, else the highest-resolution one), `change_threshold` (0.02; a frame whose downscaled grey image differs from the last OCRed one by less than this
+mean fraction is not OCRed, it extends the current entry), `max_frames` (5000 OCR runs; a note on the input's entry says when it was reached, the output holds what was read before).
+
+Output, `frame-ocr/<file.rel>/ocr.json`: `[{"t_start": 12.0, "t_end": 18.0, "text": "...", "conf": 71, "engine": "tesseract|remote"}]`; consecutive near-identical results (ratio >= 0.9) are one
+entry, an empty result ends it, `conf` is null for `remote`. Nothing is written for images, audio, or a video without a frame pass.
+See also: [Plan: Frame OCR](implemented-plans/06-frame-ocr.md)
+
 ## Caption
 
 `features: {"caption": "<profile>", "caption-fallback": "<profile>"}` (the fallback is optional) turns on captions of images and of video keyframes by a vision model. Needs `media-decode`
