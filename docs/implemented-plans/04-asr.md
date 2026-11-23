@@ -1,6 +1,7 @@
 # Plan: ASR (transcription)
 
-> **Status: draft.** Depends on [processor-handoff](01-processor-handoff.md), [media-decode](../implemented-plans/02-media-decode.md) and [sidecar-usage-reporting](../implemented-plans/03-sidecar-usage-reporting.md).
+> **Status: implemented.** Depends on [processor-handoff](01-processor-handoff.md), [media-decode](02-media-decode.md) and [sidecar-usage-reporting](03-sidecar-usage-reporting.md).
+> Deviations: options live in one shared `options["asr"]` entry; chunk outcome `failed` added (no text and not all blocked); a 503 from the sidecar is waited out (`ASR_BUSY_WAIT`), not counted as an attempt; `metadata` and `media-decode` skip synthetic members.
 
 ## Problem / Goal
 

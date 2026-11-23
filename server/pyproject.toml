@@ -29,6 +29,10 @@ html = "cadmus_parser_server.parse:Html"
 documents = "cadmus_parser_server.parse:Documents"
 members = "cadmus_parser_server.parse:Members"
 media-decode = "cadmus_parser_server.media_decode:MediaDecode"
+asr-split = "cadmus_parser_server.asr:AsrSplit"
+asr-primary = "cadmus_parser_server.asr:AsrPrimary"
+asr-fallback = "cadmus_parser_server.asr:AsrFallback"
+asr-degrade = "cadmus_parser_server.asr:AsrDegrade"
 
 [tool.setuptools.packages.find]
 include = ["cadmus_parser_server*"]

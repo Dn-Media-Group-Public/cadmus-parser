@@ -20,7 +20,7 @@ Every request carries `Authorization: Bearer <WRAPPER_TOKEN>`. Every non-2xx ans
 - `input.options` / `output.options` are the credential for that side (an fsspec `storage_options` fragment), merged over `PARSE_BLOB_OPTIONS`, in memory only.
   The two sides may be different stores. A GCS downscoped token travels as `gcs_access_token` (a string; `cadmus_parser.wire` converts).
 - `options` is **keyed by processor name**; a processor sees only its own entry. There is no `processor` field: every installed processor that accepts a file runs.
-- `features` is `{name: profile}`; only `ocr` ships. Unknown name or profile: 400.
+- `features` is `{name: profile}`; `ocr`, `asr` and `asr-fallback` ship (the last two are the ASR primary and fallback model, see [ASR](#asr)). Unknown name or profile: 400.
 - No class or limit fields: the wrapper picks the media class itself and only the operator sets numbers.
 
 Answers: `202 {"status": "running", "id": "<opaque job id>", "owner": "<ip:port>"}`; `400` bad body, unknown feature or profile, credential rejected or output base
@@ -98,9 +98,9 @@ Group `cadmus_parser.processors`; see [How to write a processor](processors.md).
   `host:port` exceptions, for a store inside your stack); networks `parse-egress` and `public`.
 - the `public` network (the way out of the proxy); the same definition may be in your own stack file.
 
-The overlay (`python -m cadmus_parser_server.overlay --client web --client worker [--dev-store host:port] [--ocr] [--parser-image my/parser:1]`) adds a
+The overlay (`python -m cadmus_parser_server.overlay --client web --client worker [--dev-store host:port] [--ocr] [--asr] [--parser-image my/parser:1]`) adds a
 network `<client>-parse` per client service that only that client and the parser are on, `PARSE_URL=http://parser:8080` and
-`PARSE_TOKEN=${WRAPPER_TOKEN}` in each client, your image for `parser`, the dev store's network for the proxy and the `ocr-sidecar` with `--ocr`.
+`PARSE_TOKEN=${WRAPPER_TOKEN}` in each client, your image for `parser`, the dev store's network for the proxy and the `ocr-sidecar` / `asr-sidecar` with `--ocr` / `--asr`.
 
 ## Environment variables
 
@@ -115,6 +115,9 @@ network `<client>-parse` per client service that only that client and the parser
 | `<PREFIX>_PROFILES[...].admin_token` | parser | optional, per profile entry: the sidecar's `<PREFIX>_ADMIN_TOKEN`; enables usage reporting for that sidecar (never reaches the parser) |
 | `PARSE_USAGE_MAX_CALLS` | parser, sidecars | most usage records kept per job (default 20000) |
 | `OCR_ADMIN_TOKEN` | ocr-sidecar | enables the admin routes for usage reporting |
+| `ASR_PROFILES`, `ASR_FALLBACK_PROFILES` | parser (stack file: `PARSE_ASR_TABLE`, `PARSE_ASR_FALLBACK_TABLE`) | like `OCR_PROFILES`, for `features.asr` and `features.asr-fallback` (both may name profiles of the same sidecar) |
+| `ASR_PROFILES`, `ASR_ADMIN_TOKEN`, `ASR_MAX_BODY`, `ASR_MAX_CONCURRENT`, `ASR_TIMEOUT` | asr-sidecar | its own profile table (see ASR below), usage reporting, caps |
+| `ASR_TIMEOUT`, `ASR_BUSY_WAIT` | parser (forwarded) | seconds per sidecar call (default 600); seconds to wait, times the try number, when the sidecar answers 503 (default 3, up to 5 tries) |
 | `PARSE_POOL_SIZE` | parser | parsers per replica (default 4); a full replica answers 503 |
 | `PARSE_UID_BASE` | parser | first pool uid (default 20000) |
 | `PARSE_SCRATCH` | parser | scratch area (default `/scratch`; an anonymous volume) |
@@ -164,3 +167,30 @@ everything in it (it is only unpacked inside the parser, under the limits alread
 `input_mib` is checked twice: before the pull, against the largest of any class (the operator's ceiling), from the object listing (the credential needs list
 permission on the input base); after the pull and classification, against the job's own class, before the parser starts. The disk bound is
 `input_mib` + `output_mib` + `fsize_mib`. A caller can neither pass nor raise a limit.
+
+## ASR
+
+`features: {"asr": "<profile>", "asr-fallback": "<profile>"}` (the fallback is optional) turns on transcription of audio and of video with sound. Needs `media-decode`
+(its `audio.opus`) and `ffmpeg`. Options, `options["asr"]`: `chunk_seconds` (300; 0 = the whole file), `chunk_overlap_seconds` (30), `language` (unset: the model detects it),
+`context` (names, terminology, topics; for a `transcriptions` model write it as transcript-style text), `workers` (4, capped by `PARSE_MEMBER_WORKERS`).
+
+Output, `asr/<file.rel>/transcript.json` (the processors' own record: advisory; trusted cost data is the sidecar's usage record in `status.json`):
+
+```json
+{"language": "...", "speaker_scope": "full|partial", "duration": 3612.4,
+ "chunks": [{"start": 0, "end": 330, "outcome": "ok|degraded|blocked|failed", "role": "primary|fallback|none", "model": "...", "attempts": 1, "reason": "...", "notes": []}],
+ "segments": [{"offset": 12.4, "speaker": "Person 1", "text": "...", "chunk": 0}]}
+```
+
+`outcome` `degraded` = every model attempt for the chunk failed validation and the one with the most segments is kept; `blocked` = every attempt was blocked by the model's safety
+filter; `failed` = no usable text and not (only) blocked. The job's `asr-split` raises (a note on the input's entry) only if no chunk has text. `speaker_scope` is `partial`
+when two chunks' speaker labels could not be matched (no matchable speech in their overlap), so the same person may appear under several labels.
+
+The `asr-sidecar` profile table (`ASR_PROFILES`): `{name: {token, base_url, model, backend: "transcriptions" (default) | "chat", auth: none|bearer|google, api_key?, audience?, prompt?,
+max_output_tokens? (chat, default 32768), audio_format? (chat, default "ogg"), response_format? (transcriptions, default "verbose_json"; "diarized_json" for speakers), form? (extra form fields)}}`.
+It makes one upstream call and does no retry, validation or fallback. `chat` exists for languages without a diarization model (the audio goes to an audio-capable LLM, the answer is
+JSON-schema constrained segments `{start: "MM:SS", speaker, text}`).
+
+Known limitations: a compressed timeline goes undetected; retrying a blocked chunk on the same model never helps (only the fallback does, so the retry is skipped); a `transcriptions` backend
+without diarization yields no speaker labels; speaker mapping across chunks depends on speech in the overlap.
+See also: [Plan: ASR](implemented-plans/04-asr.md)

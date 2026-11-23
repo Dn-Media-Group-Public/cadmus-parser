@@ -3,14 +3,14 @@
 
 It adds what depends on the client: a network `<client>-parse` per client service that only that client and the parser are on (one shared
 network would let the clients reach each other), PARSE_URL and PARSE_TOKEN (= ${WRAPPER_TOKEN}) in each client, the parser on all of those
-networks, the client's own image for `parser`, the dev store's network for the egress proxy, and the `ocr-sidecar` with OCR. The output is JSON,
+networks, the client's own image for `parser`, the dev store's network for the egress proxy, and the `ocr-sidecar` with OCR (`asr-sidecar` with ASR). The output is JSON,
 which is YAML; a client's own per-service additions go in `extra_env`."""
 
 import argparse
 import json
 
 
-def overlay(clients: list[str], dev_store: str | None = None, ocr: bool = False, parser_image: str | None = None, extra_env: dict | None = None,
+def overlay(clients: list[str], dev_store: str | None = None, ocr: bool = False, asr: bool = False, parser_image: str | None = None, extra_env: dict | None = None,
             dev_store_network: str | None = None, network_names: dict | None = None) -> dict:
     """`dev_store` = host:port of a store inside the stack that the proxy may reach (exactly that address and port); its network is `dev_store_network`
     (default: the host name). `extra_env` = {service: {VAR: value}} merged into the clients' environment. `network_names` = {service: network}
@@ -28,6 +28,12 @@ def overlay(clients: list[str], dev_store: str | None = None, ocr: bool = False,
             "cap_add": ["NET_ADMIN", "SETUID", "SETGID", "SETPCAP", "KILL"], "deploy": {"replicas": 1, "restart_policy": {"condition": "any"}},
             "environment": {"OCR_PROFILES": "${OCR_PROFILES}", "OCR_TIMEOUT": "${OCR_TIMEOUT:-120}", "OCR_MAX_BODY": "${OCR_MAX_BODY:-10485760}",
                             "OCR_MAX_CONCURRENT": "${OCR_MAX_CONCURRENT:-4}"}, "networks": ["parse-ocr", "public"]}
+    if asr:
+        doc["services"]["asr-sidecar"] = {
+            "image": "${IMAGE_PREFIX:-}cadmus-parser-asr-sidecar:${IMAGE_TAG:-local}", "cap_drop": ["ALL"],
+            "cap_add": ["NET_ADMIN", "SETUID", "SETGID", "SETPCAP", "KILL"], "deploy": {"replicas": 1, "restart_policy": {"condition": "any"}},
+            "environment": {"ASR_PROFILES": "${ASR_PROFILES}", "ASR_ADMIN_TOKEN": "${ASR_ADMIN_TOKEN:-}", "ASR_TIMEOUT": "${ASR_TIMEOUT:-600}",
+                            "ASR_MAX_BODY": "${ASR_MAX_BODY:-26214400}", "ASR_MAX_CONCURRENT": "${ASR_MAX_CONCURRENT:-4}"}, "networks": ["parse-asr", "public"]}
     return doc
 
 
@@ -37,9 +43,10 @@ def main(argv=None) -> None:
     ap.add_argument("--dev-store", help="host:port of a store inside the stack the proxy may reach")
     ap.add_argument("--dev-store-network")
     ap.add_argument("--ocr", action="store_true", help="add the ocr-sidecar (OCR_PROFILES must be set at deploy)")
+    ap.add_argument("--asr", action="store_true", help="add the asr-sidecar (ASR_PROFILES must be set at deploy)")
     ap.add_argument("--parser-image", help="the client's own parser image (FROM the base image)")
     a = ap.parse_args(argv)
-    print(json.dumps(overlay(a.client, a.dev_store, a.ocr, a.parser_image, dev_store_network=a.dev_store_network), indent=2))
+    print(json.dumps(overlay(a.client, a.dev_store, a.ocr, a.asr, a.parser_image, dev_store_network=a.dev_store_network), indent=2))
 
 
 if __name__ == "__main__":

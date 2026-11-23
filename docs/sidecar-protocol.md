@@ -2,7 +2,7 @@
 
 A sidecar is a service the sandboxed parser may use without holding what it needs: a remote OCR endpoint and its API key, a translation model, a virus scanner.
 The parser holds one **token**; the sidecar holds everything else. Each sidecar stays specific to its job and does its own work behind this protocol. The
-`ocr-sidecar` in this repository is the reference implementation.
+`ocr-sidecar` in this repository is the reference implementation; the `asr-sidecar` shows a JSON answer and several profiles of one service.
 
 ## Wiring
 
@@ -20,7 +20,7 @@ Plain HTTP, bytes in and bytes out.
   `Content-Type` (MIME type of the body), `Content-Disposition` (filename, optional); any other header is allowed and is used as that sidecar sees fit. Options
   travel as extra request headers that the sidecar interprets, named with the standard `X-` prefix only (`X-Language`). Nothing else names the feature or the
   profile: what the sidecar does and which profile it uses is controlled by the token and the file.
-- **The response** body is the result bytes, with its own `Content-Type` and, where relevant, `Content-Disposition`, both set by the sidecar.
+- **The response** body (JSON for the `asr-sidecar`: the raw segments or text of one upstream call and its finish/block status) is the result bytes, with its own `Content-Type` and, where relevant, `Content-Disposition`, both set by the sidecar.
 - **`GET /health`**: `200 {"ok": true}`, no authentication.
 - No other methods or routes (except the optional admin routes below).
 
@@ -32,12 +32,12 @@ path from the request and has no store access.
 A sidecar that spends money on behalf of a job can report it. With an `ADMIN_TOKEN` configured it adds admin routes, authenticated by `Authorization: Bearer
 <ADMIN_TOKEN>` (known to the wrapper only, never the parser):
 
-- `POST /admin/jobs` `{"job", "profile", "ttl"?}` -> `{"token"}`: a fresh job token that selects the same profile as the profile token and is tied to the job.
+- `POST /admin/jobs` `{"job", "profile", "ttl"?}` (the wrapper sends `<job id>.<feature>`, one record per feature, so two features on one sidecar never share one) -> `{"token"}`: a fresh job token that selects the same profile as the profile token and is tied to the job.
   The wrapper gives the parser this token in `<FEATURE>_TOKEN`; the sidecar attributes each call carrying it to the job. A job id in a header is never trusted.
 - `GET /admin/jobs/<id>/usage` -> `{"calls": [...], "truncated": bool}`, and drops the record and the token. `DELETE /admin/jobs/<id>` drops without reading.
 - Job tokens expire after `ttl` seconds (the wrapper sends the job's deadline plus a margin).
 
-Record format and `status.json`: see the [reference](reference.md#statusjson-and-indexjson). `common/usage.py` implements all of it; the `ocr-sidecar` uses it.
+Record format and `status.json`: see the [reference](reference.md#statusjson-and-indexjson). `common/usage.py` implements all of it; the `ocr-sidecar` and `asr-sidecar` use it.
 See also: [Plan: sidecar usage reporting](implemented-plans/03-sidecar-usage-reporting.md)
 
 ## Errors and limits
@@ -54,4 +54,4 @@ when it is exceeded, answer `503` when it is busy, and serve `GET /health`.
 A sidecar that reaches an upstream should pin its own egress (iptables rules applied at start as root with `NET_ADMIN`, then dropped): see
 `common/egress_rules.py` (`pinned_rules` for a fixed set of endpoints, `public_rules` for a proxy). Put it on an internal network shared only with the parser.
 
-There is a written spec only: no conformance suite and no skeleton service. The library's own sidecars have unit tests (`ocr-sidecar/tests`).
+There is a written spec only: no conformance suite and no skeleton service. The library's own sidecars have unit tests (`ocr-sidecar/tests`, `asr-sidecar/tests`).

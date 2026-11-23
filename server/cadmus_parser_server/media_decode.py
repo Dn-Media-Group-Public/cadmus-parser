@@ -226,6 +226,8 @@ class MediaDecode:
     before = ("sizecap", "archives", "markdown", "binary", "html", "apk", "documents")  # sizecap would claim a large video first
 
     def accepts(self, file) -> bool:
+        if file.index_address is not None:  # a synthetic member (an ASR chunk) is already audio.opus
+            return False
         with open(file.path, "rb") as f:
             return sniff(f.read(16)) is not None
 

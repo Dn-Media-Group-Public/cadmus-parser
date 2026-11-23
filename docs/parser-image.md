@@ -24,6 +24,6 @@ ENTRYPOINT ["tini", "--", "/cadmus/server/entrypoint.sh"]
 - Scratch keeps every intermediate until the job ends: size `PARSE_SCRATCH` for the input plus the kept intermediates of the largest job (the per-job limits still bound it).
   See also: [Plan: processor handoff](implemented-plans/01-processor-handoff.md)
 - `/scratch` is an anonymous volume: the scratch area is ephemeral, so a restart deletes what a crash left.
-- Sidecars are used as built by the library: `docker build -f blob-sidecar/Dockerfile .`, `docker build -f ocr-sidecar/Dockerfile .` (the library root is the context). `server/Dockerfile`
+- Sidecars are used as built by the library: `docker build -f blob-sidecar/Dockerfile .`, `docker build -f ocr-sidecar/Dockerfile .`, `docker build -f asr-sidecar/Dockerfile .` (the library root is the context). `server/Dockerfile`
   builds a ready-made image with the default processors and their tools (the quickstart uses it).
 - Point the stack at your image with the overlay: `python -m cadmus_parser_server.overlay --client web --parser-image myorg/my-parser:1`.

@@ -98,3 +98,14 @@ Options (`options["media-decode"]`): `thumb_side` (320), `keyframe_scene_thresho
 The frame store is large (a 2 h video: about 100 MB for `540@10`, 1 GB for `full@0.5` at 1080p): raise `output_mib` and, for long videos, `deadline_s` of the `video` class in `PARSE_LIMITS`.
 Needs `ffmpeg` (with libx264 and libopus) and, for images, `Pillow` and `pillow-heif` (both in the `files` extra).
 See also: [Plan: media decode](implemented-plans/02-media-decode.md)
+
+## asr
+
+Four processors (`asr-split`, `asr-primary`, `asr-fallback`, `asr-degrade`; see [reference](reference.md#asr)) and the model for any "primary, fallback, last resort" work on pieces of a file:
+the parent (`asr-split`, after `media-decode`) cuts `audio.opus` into chunk **files** in its `ctx.dir()` (with a `chunks.json`) and calls
+`ctx.recurse_many(..., synthetic=True)` on them; the chain runs on each chunk. `asr-primary` accepts only chunks made by `asr-split` (a synthetic member with a
+`chunk-NNNN.opus` name and a `chunks.json` beside it), calls the sidecar, validates (`modelcheck.py`), keeps the result in its `ctx.dir()` (`segments.json`) and **claims** the chunk.
+On failure it leaves `attempt.json` and does not claim; `asr-fallback` (`after = ("asr-primary",)`) then tries the other profile, and `asr-degrade` keeps the best salvaged attempt and always
+claims. The parent reads each chunk's `segments.json` from `member.dir(member.claimed_by)` and writes the only output. `metadata` and `media-decode` skip synthetic members
+(`file.index_address is not None`), and the ASR processors are ordered `before` the content handlers so `documents` never sees a chunk.
+See also: [Plan: ASR](implemented-plans/04-asr.md)

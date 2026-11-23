@@ -42,14 +42,14 @@ from cadmus_parser_server import limits as lm
 
 log = logging.getLogger("wrapper")
 API_VERSION = "1"
-FEATURES = {"ocr": "OCR"}  # feature -> environment prefix: <PREFIX>_PROFILES (name -> {url, token}) here, <PREFIX>_URL/<PREFIX>_TOKEN in the parser
+FEATURES = {"ocr": "OCR", "asr": "ASR", "asr-fallback": "ASR_FALLBACK"}  # feature -> environment prefix: <PREFIX>_PROFILES (name -> {url, token}) here, <PREFIX>_URL/<PREFIX>_TOKEN in the parser
 LINE_MAX = 4096  # PIPE_BUF: the parser writes each record with one write
 HEARTBEAT, STALE = 10, 30  # seconds
 MAX_DEPTH = 8  # archive levels in index.json
 MAX_META = 2000  # bytes of one entry's `meta`, as JSON
 # the operator settings the parser process enforces (no secret): the only part of the wrapper's own environment a parser gets; PARSE_PASS_ENV adds names
 PARSER_ENV = ("MAX_PARSE_BYTES", "MAX_ARCHIVE_BYTES", "MAX_ARCHIVE_MEMBERS", "PARSE_MEMBER_WORKERS", "MAX_SYNTHETIC_MEMBERS", "METADATA_TIMEOUT", "METADATA_MAX_MEM", "METADATA_MAX_BYTES", "OCR_TIMEOUT",
-              "OCR_LANGS", "OCR_MIN_CONF", "OCR_MIN_CHARS", "OCR_DPI", "OCR_MAX_PAGES", "OCR_MAX_SIDE", "OCR_TESSERACT_TIMEOUT")
+              "OCR_LANGS", "OCR_MIN_CONF", "OCR_MIN_CHARS", "OCR_DPI", "OCR_MAX_PAGES", "OCR_MAX_SIDE", "OCR_TESSERACT_TIMEOUT", "ASR_TIMEOUT", "ASR_BUSY_WAIT")
 
 
 def sidecar_call(p: dict, method: str, path: str, body: dict | None = None) -> dict:
@@ -327,13 +327,13 @@ class Job:
             self.write_json("status.json", {**s, "usage": usage} if usage else s)  # usage is not remembered: it can be big
 
     # -- usage reporting: the parser gets a job token, the sidecar records against it, the wrapper reads the record --
-    def register(self, lim: dict) -> None:
+    def register(self, lim: dict) -> None:  # one sidecar record per feature (id `<job>.<feature>`): two features on one sidecar must not share a record
         ttl = (lim["deadline_s"] or 3600) + 300
         for feature, profile in (self.req.get("features") or {}).items():
             p = self.w.cfg.profiles[feature][profile]
             if p.get("admin_token"):
                 try:
-                    self.tokens[feature] = sidecar_call(p, "POST", "/admin/jobs", {"job": self.id, "profile": profile, "ttl": ttl})["token"]
+                    self.tokens[feature] = sidecar_call(p, "POST", "/admin/jobs", {"job": f"{self.id}.{feature}", "profile": profile, "ttl": ttl})["token"]
                 except Exception as e:  # noqa: BLE001  no usage for this feature; the parser keeps the profile token and the job runs
                     log.warning("could not register job %s with %s: %s", self.key, feature, e)
                     self.reg_errors.append(f"{feature}: {type(e).__name__}")
@@ -343,7 +343,7 @@ class Job:
         for feature in self.tokens:
             p = self.w.cfg.profiles[feature][self.req["features"][feature]]
             try:
-                r = sidecar_call(p, "GET", f"/admin/jobs/{self.id}/usage")
+                r = sidecar_call(p, "GET", f"/admin/jobs/{self.id}.{feature}/usage")
                 calls += r["calls"]
                 truncated |= bool(r.get("truncated"))
             except Exception as e:  # noqa: BLE001

@@ -51,7 +51,7 @@ class Metadata:
     name, top_dirs, before = "metadata", ("metadata",), ("sizecap", "archives", "markdown", "binary", "html", "apk", "documents")
 
     def accepts(self, file) -> bool:
-        return True
+        return file.index_address is None  # a synthetic member (an ASR chunk) is not an input: nothing to report about it
 
     def process(self, sink, file, ctx) -> None:
         ctype, path = _ctype(file, ctx), file.rel

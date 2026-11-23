@@ -519,3 +519,20 @@ def test_usage_is_registered_collected_and_written_to_status(service, monkeypatc
     j.post(features={"ocr": "lan"})
     st = j.wait()
     assert st["status"] == "done" and st["usage"]["error"] == "ocr: OSError" and st["usage"]["calls"] == []
+
+
+def test_two_features_on_one_sidecar_have_separate_usage_records(service, monkeypatch):
+    records = {}
+
+    def fake(p, method, path, body=None):  # a stand-in sidecar: one record per registered id, dropped when read
+        if method == "POST":
+            records[body["job"]] = [{"t": len(records), "profile": body["profile"]}]
+            return {"token": "tok-" + body["profile"]}
+        return {"calls": records.pop(path.split("/")[3]), "truncated": False}  # a second read of the same id would raise KeyError
+    monkeypatch.setattr(wrapper, "sidecar_call", fake)
+    side = {"url": "http://asr", "token": "t", "admin_token": "adm"}
+    s = service(profiles={"asr": {"p1": side}, "asr-fallback": {"p2": side}}, parser_cmd=hostile("pass"))
+    j = s.job({"a.md": b"# a"})
+    j.post(features={"asr": "p1", "asr-fallback": "p2"})
+    st = j.wait()
+    assert st["usage"] == {"calls": [{"t": 0, "profile": "p1"}, {"t": 1, "profile": "p2"}], "truncated": False} and not records
