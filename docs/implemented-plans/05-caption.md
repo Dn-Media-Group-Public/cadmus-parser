@@ -1,10 +1,11 @@
 # Plan: Caption (image-to-text)
 
-> **Status: draft.** Depends on [processor-handoff](01-processor-handoff.md), [media-decode](../implemented-plans/02-media-decode.md) and [sidecar-usage-reporting](../implemented-plans/03-sidecar-usage-reporting.md); shares `modelcheck.py` and the primary/fallback pattern with [asr](../implemented-plans/04-asr.md).
+> **Status: implemented.** Depends on [processor-handoff](01-processor-handoff.md), [media-decode](02-media-decode.md) and [sidecar-usage-reporting](03-sidecar-usage-reporting.md); shares `modelcheck.py` and the primary/fallback pattern with [asr](04-asr.md).
+> Deviations: an image unit is also a `window-NNNN.json` manifest (kind `image`, one path), so one detection rule serves both; the skipped unit stays in `captions.json` with empty `text` and its `outcome`, and is noted; options in one shared `options["caption"]` (`max_side`, `window_frames`, `workers`); the sidecar takes a video window as `multipart/mixed` with `X-Frame-Times`; one `chat` backend only; a 503 is waited out (`CAPTION_BUSY_WAIT`), not counted as an attempt.
 
 ## Problem / Goal
 
-Images and video are not searchable text. A vision model can describe them, but the parser must not hold its key, and its answers need validation and a fallback like [asr](../implemented-plans/04-asr.md).
+Images and video are not searchable text. A vision model can describe them, but the parser must not hold its key, and its answers need validation and a fallback like [asr](04-asr.md).
 
 Goal: a `caption-sidecar` (one call to one vision model, holds the credentials) and processors that make each captionable unit a **file** and caption it with a primary and a
 fallback processor, producing `caption/<file.rel>/captions.json`.
@@ -42,7 +43,7 @@ An image has one entry with `t_start = t_end = 0`.
 
 ## Implementation order
 
-1. [processor-handoff](01-processor-handoff.md) and `modelcheck.py` (from [asr](../implemented-plans/04-asr.md)).
+1. [processor-handoff](01-processor-handoff.md) and `modelcheck.py` (from [asr](04-asr.md)).
 2. `caption-sidecar/` (image and window requests, usage), tests with a fake upstream.
 3. Processors: window building, scaling, primary/fallback/skip; tests on synthetic keyframes.
 4. Wrapper `FEATURES`, overlay (`--caption`), stack file service; docs.

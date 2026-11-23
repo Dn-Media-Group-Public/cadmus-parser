@@ -3,7 +3,7 @@
 # nothing; `blob-sidecar` = the authenticated egress proxy the wrapper reaches the store through (the parser has no route out: its networks are
 # internal). Deploy with `docker stack deploy -c docker-compose.parse.yml -c <overlay> ...`; `python -m cadmus_parser_server.overlay` writes
 # the overlay: a `<client>-parse` network per client service (the client and the parser on it), PARSE_URL/PARSE_TOKEN in each client,
-# the dev store's network for the proxy, your image for `parser` and the `ocr-sidecar` when OCR is configured.
+# the dev store's network for the proxy, your image for `parser` and the `ocr-sidecar` / `asr-sidecar` / `caption-sidecar` when configured.
 version: "3.8"
 
 services:
@@ -24,6 +24,10 @@ services:
       PARSE_PROXY_HOST: blob-sidecar:3128
       PARSE_BLOB_OPTIONS: ${PARSE_BLOB_OPTIONS:-}   # fsspec options merged under every job's own credentials (endpoint ...), no secrets: the credentials come with each POST
       OCR_PROFILES: ${PARSE_OCR_TABLE:-}            # name -> {url, token}: the wrapper hands a parser only the profile its job asked for
+      ASR_PROFILES: ${PARSE_ASR_TABLE:-}            # same for `features.asr`, and for the fallback model `features.asr-fallback`
+      ASR_FALLBACK_PROFILES: ${PARSE_ASR_FALLBACK_TABLE:-}
+      CAPTION_PROFILES: ${PARSE_CAPTION_TABLE:-}    # same for `features.caption`, and for the fallback model `features.caption-fallback`
+      CAPTION_FALLBACK_PROFILES: ${PARSE_CAPTION_FALLBACK_TABLE:-}
       PARSE_POOL_SIZE: ${PARSE_POOL_SIZE:-4}
       PARSE_LIMITS: ${PARSE_LIMITS:-}               # per media class, see docs/reference.md; every built-in default is finite
       PARSE_PASS_ENV: ${PARSE_PASS_ENV:-}             # names of further variables the parser process is to see (processor settings, no secrets)
@@ -36,8 +40,10 @@ services:
       METADATA_MAX_MEM: ${METADATA_MAX_MEM:-}
       METADATA_MAX_BYTES: ${METADATA_MAX_BYTES:-}
       OCR_TIMEOUT: ${OCR_TIMEOUT:-}
+      ASR_TIMEOUT: ${ASR_TIMEOUT:-}
+      CAPTION_TIMEOUT: ${CAPTION_TIMEOUT:-}
       REPLICA_ID: "{{.Task.Slot}}"
-    networks: [parse-egress, parse-ocr]
+    networks: [parse-egress, parse-ocr, parse-asr, parse-caption]
 
   blob-sidecar:
     image: ${IMAGE_PREFIX:-}cadmus-parser-blob-sidecar:${IMAGE_TAG:-local}   # blob-sidecar/Dockerfile (context: this repo's root): squid 6, own egress rules
@@ -53,3 +59,5 @@ networks:
   public: { driver: overlay }                        # the way out of the proxy (the same definition may be in the client's stack file)
   parse-egress: { driver: overlay, internal: true }   # parser <-> proxy: no route out
   parse-ocr: { driver: overlay, internal: true }      # parser <-> ocr-sidecar
+  parse-asr: { driver: overlay, internal: true }      # parser <-> asr-sidecar
+  parse-caption: { driver: overlay, internal: true }  # parser <-> caption-sidecar

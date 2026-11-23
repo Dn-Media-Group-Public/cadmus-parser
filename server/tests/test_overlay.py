@@ -20,6 +20,8 @@ def test_overlay_per_client_networks_env_and_optional_parts():
     assert doc["services"]["ocr-sidecar"]["networks"] == ["parse-ocr", "public"] and "NET_ADMIN" in doc["services"]["ocr-sidecar"]["cap_add"]
     asr = overlay.overlay(["w"], asr=True)["services"]["asr-sidecar"]
     assert asr["networks"] == ["parse-asr", "public"] and "ASR_PROFILES" in asr["environment"] and "ocr-sidecar" not in overlay.overlay(["w"], asr=True)["services"]
+    cap = overlay.overlay(["w"], caption=True)["services"]["caption-sidecar"]
+    assert cap["networks"] == ["parse-caption", "public"] and "CAPTION_PROFILES" in cap["environment"]
     assert overlay.overlay(["w"], network_names={"w": "mine"})["services"]["w"]["networks"] == ["mine"]
     plain = overlay.overlay(["w"])
     assert set(plain["services"]) == {"parser", "w"} and "image" not in plain["services"]["parser"]

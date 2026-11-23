@@ -109,3 +109,12 @@ On failure it leaves `attempt.json` and does not claim; `asr-fallback` (`after =
 claims. The parent reads each chunk's `segments.json` from `member.dir(member.claimed_by)` and writes the only output. `metadata` and `media-decode` skip synthetic members
 (`file.index_address is not None`), and the ASR processors are ordered `before` the content handlers so `documents` never sees a chunk.
 See also: [Plan: ASR](implemented-plans/04-asr.md)
+
+## caption
+
+Four processors (`caption-split`, `caption-primary`, `caption-fallback`, `caption-skip`; see [reference](reference.md#caption)), the same shape as [asr](#asr): the parent
+(`caption-split`, after `media-decode`) writes one **unit file** per captionable unit into its `ctx.dir()` (`window-NNNN.json`: kind, frame paths and times; an image is one unit
+pointing at the original or its `web.png`) and calls `ctx.recurse_many(..., synthetic=True)`. `caption-primary` accepts only such synthetic files, scales the frames, calls the sidecar,
+validates (`modelcheck.evaluate_text`) and keeps `caption.json` in its `ctx.dir()` and claims; on failure it leaves `attempt.json`. `caption-fallback` tries the other profile,
+`caption-skip` claims what is left with an empty, `blocked` or `invalid` result (there is no degraded text worth keeping). The parent writes the only output, `captions.json`.
+See also: [Plan: Caption](implemented-plans/05-caption.md)

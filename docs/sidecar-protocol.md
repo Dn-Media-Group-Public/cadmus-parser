@@ -2,7 +2,7 @@
 
 A sidecar is a service the sandboxed parser may use without holding what it needs: a remote OCR endpoint and its API key, a translation model, a virus scanner.
 The parser holds one **token**; the sidecar holds everything else. Each sidecar stays specific to its job and does its own work behind this protocol. The
-`ocr-sidecar` in this repository is the reference implementation; the `asr-sidecar` shows a JSON answer and several profiles of one service.
+`ocr-sidecar` in this repository is the reference implementation; the `asr-sidecar` shows a JSON answer and several profiles of one service, the `caption-sidecar` an image or multipart request.
 
 ## Wiring
 
@@ -37,7 +37,7 @@ A sidecar that spends money on behalf of a job can report it. With an `ADMIN_TOK
 - `GET /admin/jobs/<id>/usage` -> `{"calls": [...], "truncated": bool}`, and drops the record and the token. `DELETE /admin/jobs/<id>` drops without reading.
 - Job tokens expire after `ttl` seconds (the wrapper sends the job's deadline plus a margin).
 
-Record format and `status.json`: see the [reference](reference.md#statusjson-and-indexjson). `common/usage.py` implements all of it; the `ocr-sidecar` and `asr-sidecar` use it.
+Record format and `status.json`: see the [reference](reference.md#statusjson-and-indexjson). `common/usage.py` implements all of it; the `ocr-sidecar`, `asr-sidecar` and `caption-sidecar` use it.
 See also: [Plan: sidecar usage reporting](implemented-plans/03-sidecar-usage-reporting.md)
 
 ## Errors and limits
@@ -54,4 +54,4 @@ when it is exceeded, answer `503` when it is busy, and serve `GET /health`.
 A sidecar that reaches an upstream should pin its own egress (iptables rules applied at start as root with `NET_ADMIN`, then dropped): see
 `common/egress_rules.py` (`pinned_rules` for a fixed set of endpoints, `public_rules` for a proxy). Put it on an internal network shared only with the parser.
 
-There is a written spec only: no conformance suite and no skeleton service. The library's own sidecars have unit tests (`ocr-sidecar/tests`, `asr-sidecar/tests`).
+There is a written spec only: no conformance suite and no skeleton service. The library's own sidecars have unit tests (`ocr-sidecar/tests`, `asr-sidecar/tests`, `caption-sidecar/tests`).

@@ -42,14 +42,14 @@ from cadmus_parser_server import limits as lm
 
 log = logging.getLogger("wrapper")
 API_VERSION = "1"
-FEATURES = {"ocr": "OCR", "asr": "ASR", "asr-fallback": "ASR_FALLBACK"}  # feature -> environment prefix: <PREFIX>_PROFILES (name -> {url, token}) here, <PREFIX>_URL/<PREFIX>_TOKEN in the parser
+FEATURES = {"ocr": "OCR", "asr": "ASR", "asr-fallback": "ASR_FALLBACK", "caption": "CAPTION", "caption-fallback": "CAPTION_FALLBACK"}  # feature -> environment prefix: <PREFIX>_PROFILES (name -> {url, token}) here, <PREFIX>_URL/<PREFIX>_TOKEN in the parser
 LINE_MAX = 4096  # PIPE_BUF: the parser writes each record with one write
 HEARTBEAT, STALE = 10, 30  # seconds
 MAX_DEPTH = 8  # archive levels in index.json
 MAX_META = 2000  # bytes of one entry's `meta`, as JSON
 # the operator settings the parser process enforces (no secret): the only part of the wrapper's own environment a parser gets; PARSE_PASS_ENV adds names
 PARSER_ENV = ("MAX_PARSE_BYTES", "MAX_ARCHIVE_BYTES", "MAX_ARCHIVE_MEMBERS", "PARSE_MEMBER_WORKERS", "MAX_SYNTHETIC_MEMBERS", "METADATA_TIMEOUT", "METADATA_MAX_MEM", "METADATA_MAX_BYTES", "OCR_TIMEOUT",
-              "OCR_LANGS", "OCR_MIN_CONF", "OCR_MIN_CHARS", "OCR_DPI", "OCR_MAX_PAGES", "OCR_MAX_SIDE", "OCR_TESSERACT_TIMEOUT", "ASR_TIMEOUT", "ASR_BUSY_WAIT")
+              "OCR_LANGS", "OCR_MIN_CONF", "OCR_MIN_CHARS", "OCR_DPI", "OCR_MAX_PAGES", "OCR_MAX_SIDE", "OCR_TESSERACT_TIMEOUT", "ASR_TIMEOUT", "ASR_BUSY_WAIT", "CAPTION_TIMEOUT", "CAPTION_BUSY_WAIT")
 
 
 def sidecar_call(p: dict, method: str, path: str, body: dict | None = None) -> dict:

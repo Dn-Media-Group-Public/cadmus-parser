@@ -18,6 +18,7 @@ class Result:
     segments: list = field(default_factory=list)  # [{"offset": float, "speaker": str | None, "text": str}], what could be salvaged
     reason: str = ""
     notes: list = field(default_factory=list)
+    text: str = ""  # evaluate_text: the validated answer
 
 
 def parse_time(v) -> float | None:
@@ -106,3 +107,19 @@ def evaluate(resp: dict, chunk_seconds: float) -> Result:
     if (why := repetition(segs)):
         return Result("invalid", segs, why)
     return Result("ok", segs, notes=notes)
+
+
+def evaluate_text(resp: dict) -> Result:
+    """Validation of a free-text answer (caption): `resp` has `text`, `finish_reason`, `block_reason`. Block, truncation, empty, repetition loop; first failure decides."""
+    finish = resp.get("finish_reason")
+    f = finish.lower() if isinstance(finish, str) else finish
+    if resp.get("block_reason") or f in BLOCKED_FINISH:
+        return Result("blocked", reason=f"blocked ({resp.get('block_reason') or finish})")
+    text = (resp.get("text") or "").strip()
+    if f not in NORMAL_FINISH:
+        return Result("invalid", reason=f"truncated (finish reason {finish})", text=text)
+    if not text:
+        return Result("invalid", reason="empty answer")
+    if (why := repetition([{"text": text}])):
+        return Result("invalid", reason=why, text=text)
+    return Result("ok", text=text)

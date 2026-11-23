@@ -33,6 +33,10 @@ asr-split = "cadmus_parser_server.asr:AsrSplit"
 asr-primary = "cadmus_parser_server.asr:AsrPrimary"
 asr-fallback = "cadmus_parser_server.asr:AsrFallback"
 asr-degrade = "cadmus_parser_server.asr:AsrDegrade"
+caption-split = "cadmus_parser_server.caption:CaptionSplit"
+caption-primary = "cadmus_parser_server.caption:CaptionPrimary"
+caption-fallback = "cadmus_parser_server.caption:CaptionFallback"
+caption-skip = "cadmus_parser_server.caption:CaptionSkip"
 
 [tool.setuptools.packages.find]
 include = ["cadmus_parser_server*"]

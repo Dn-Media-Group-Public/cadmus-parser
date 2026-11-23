@@ -20,7 +20,7 @@ Every request carries `Authorization: Bearer <WRAPPER_TOKEN>`. Every non-2xx ans
 - `input.options` / `output.options` are the credential for that side (an fsspec `storage_options` fragment), merged over `PARSE_BLOB_OPTIONS`, in memory only.
   The two sides may be different stores. A GCS downscoped token travels as `gcs_access_token` (a string; `cadmus_parser.wire` converts).
 - `options` is **keyed by processor name**; a processor sees only its own entry. There is no `processor` field: every installed processor that accepts a file runs.
-- `features` is `{name: profile}`; `ocr`, `asr` and `asr-fallback` ship (the last two are the ASR primary and fallback model, see [ASR](#asr)). Unknown name or profile: 400.
+- `features` is `{name: profile}`; `ocr`, `asr`, `asr-fallback`, `caption` and `caption-fallback` ship (primary and fallback model of [ASR](#asr) and [caption](#caption)). Unknown name or profile: 400.
 - No class or limit fields: the wrapper picks the media class itself and only the operator sets numbers.
 
 Answers: `202 {"status": "running", "id": "<opaque job id>", "owner": "<ip:port>"}`; `400` bad body, unknown feature or profile, credential rejected or output base
@@ -98,9 +98,9 @@ Group `cadmus_parser.processors`; see [How to write a processor](processors.md).
   `host:port` exceptions, for a store inside your stack); networks `parse-egress` and `public`.
 - the `public` network (the way out of the proxy); the same definition may be in your own stack file.
 
-The overlay (`python -m cadmus_parser_server.overlay --client web --client worker [--dev-store host:port] [--ocr] [--asr] [--parser-image my/parser:1]`) adds a
+The overlay (`python -m cadmus_parser_server.overlay --client web --client worker [--dev-store host:port] [--ocr] [--asr] [--caption] [--parser-image my/parser:1]`) adds a
 network `<client>-parse` per client service that only that client and the parser are on, `PARSE_URL=http://parser:8080` and
-`PARSE_TOKEN=${WRAPPER_TOKEN}` in each client, your image for `parser`, the dev store's network for the proxy and the `ocr-sidecar` / `asr-sidecar` with `--ocr` / `--asr`.
+`PARSE_TOKEN=${WRAPPER_TOKEN}` in each client, your image for `parser`, the dev store's network for the proxy and the `ocr-sidecar` / `asr-sidecar` / `caption-sidecar` with `--ocr` / `--asr` / `--caption`.
 
 ## Environment variables
 
@@ -117,6 +117,9 @@ network `<client>-parse` per client service that only that client and the parser
 | `OCR_ADMIN_TOKEN` | ocr-sidecar | enables the admin routes for usage reporting |
 | `ASR_PROFILES`, `ASR_FALLBACK_PROFILES` | parser (stack file: `PARSE_ASR_TABLE`, `PARSE_ASR_FALLBACK_TABLE`) | like `OCR_PROFILES`, for `features.asr` and `features.asr-fallback` (both may name profiles of the same sidecar) |
 | `ASR_PROFILES`, `ASR_ADMIN_TOKEN`, `ASR_MAX_BODY`, `ASR_MAX_CONCURRENT`, `ASR_TIMEOUT` | asr-sidecar | its own profile table (see ASR below), usage reporting, caps |
+| `CAPTION_PROFILES`, `CAPTION_FALLBACK_PROFILES` | parser (stack file: `PARSE_CAPTION_TABLE`, `PARSE_CAPTION_FALLBACK_TABLE`) | like `ASR_PROFILES`, for `features.caption` and `features.caption-fallback` |
+| `CAPTION_PROFILES`, `CAPTION_ADMIN_TOKEN`, `CAPTION_MAX_BODY`, `CAPTION_MAX_CONCURRENT`, `CAPTION_TIMEOUT` | caption-sidecar | its own profile table (see Caption below), usage reporting, caps |
+| `CAPTION_TIMEOUT`, `CAPTION_BUSY_WAIT` | parser (forwarded) | seconds per sidecar call (default 120); seconds to wait, times the try number, on a 503 (default 3, up to 5 tries) |
 | `ASR_TIMEOUT`, `ASR_BUSY_WAIT` | parser (forwarded) | seconds per sidecar call (default 600); seconds to wait, times the try number, when the sidecar answers 503 (default 3, up to 5 tries) |
 | `PARSE_POOL_SIZE` | parser | parsers per replica (default 4); a full replica answers 503 |
 | `PARSE_UID_BASE` | parser | first pool uid (default 20000) |
@@ -194,3 +197,25 @@ JSON-schema constrained segments `{start: "MM:SS", speaker, text}`).
 Known limitations: a compressed timeline goes undetected; retrying a blocked chunk on the same model never helps (only the fallback does, so the retry is skipped); a `transcriptions` backend
 without diarization yields no speaker labels; speaker mapping across chunks depends on speech in the overlap.
 See also: [Plan: ASR](implemented-plans/04-asr.md)
+
+## Caption
+
+`features: {"caption": "<profile>", "caption-fallback": "<profile>"}` (the fallback is optional) turns on captions of images and of video keyframes by a vision model. Needs `media-decode`
+(its keyframes, `web.png`) and, for scaling, `Pillow`. Options, `options["caption"]`: `max_side` (1536; frames are scaled down to this before sending), `window_frames` (20, at most 20;
+consecutive keyframes captioned together), `workers` (4, capped by `PARSE_MEMBER_WORKERS`). An image is one unit, a video is one unit per window of keyframes.
+
+Output, `caption/<file.rel>/captions.json` (the processors' own record: advisory; trusted cost data is the sidecar's usage record in `status.json`):
+
+```json
+{"kind": "image|video",
+ "captions": [{"t_start": 0.0, "t_end": 94.2, "text": "...", "outcome": "ok|blocked|invalid", "role": "primary|fallback|none", "model": "...", "frames": [0, 1, 2]}]}
+```
+
+An image has one entry with `t_start = t_end = 0`; a window ends where the next begins (the last at the video's duration). Each unit is tried on the primary (twice on `invalid`, once on
+`blocked`), then the fallback; a unit nobody captioned keeps `outcome` `blocked` (every attempt) or `invalid`, empty `text`, and is noted on the input's entry; it never fails the job.
+The caption may use Markdown emphasis; the default prompt forbids raw HTML.
+
+The `caption-sidecar` profile table (`CAPTION_PROFILES`): `{name: {token, base_url, model, auth: none|bearer|google, api_key?, audience?, prompt?, max_output_tokens? (default 2048)}}`
+(OpenAI-compatible chat completions, frames as `image_url` data URIs). `POST /process`: an image body (`image/*`), or `multipart/mixed` of up to 20 `image/*` parts with `X-Frame-Times`
+(seconds, comma separated, one per part); answer `{text, finish_reason, block_reason, model}`. One upstream call, no retry, validation or fallback.
+See also: [Plan: Caption](implemented-plans/05-caption.md)

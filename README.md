@@ -60,6 +60,7 @@ The adversary is **the file, and so the parser** that reads it. The client (your
 | `server/` (`cadmus-parser-server`) | the wrapper (HTTP API, uid pool, upload, `status.json`/`index.json`), the worker (the sandboxed process), the processor registry, the default processors (the `files` extra) and the stack-file overlay generator |
 | `client/` (`cadmus-parser`) | what a client uses: `Client` (post a job, wait, read the index), `mint` (job-scoped store credentials) and `renew_loop` (keeps them alive during long jobs) |
 | `blob-sidecar/` | the authenticated egress proxy (squid) the wrapper reaches the store through; public internet only |
+| `caption-sidecar/` | one image or window of keyframes to one upstream vision-model call, JSON answer; the processors in `server/` window, validate and fall back ([caption](docs/reference.md#caption)) |
 | `asr-sidecar/` | one audio chunk to one upstream ASR call (`transcriptions` or `chat` backend), JSON answer; the processors in `server/` chunk, validate, fall back and merge ([ASR](docs/reference.md#asr)) |
 | `ocr-sidecar/` | a forwarder to OpenAI-compatible OCR endpoints, one token per profile; the model for [your own sidecar](docs/sidecar-protocol.md) |
 | `docker-compose.parse.yml` | the swarm stack file: `parser`, `blob-sidecar`, networks and capabilities |
@@ -75,7 +76,7 @@ The adversary is **the file, and so the parser** that reads it. The client (your
 
 ## Tests
 
-`pip install "./server[s3,files,test]" "./client[test]" pytest-asyncio httpx` then, one process per area: `python -m pytest server`, `client`, `blob-sidecar`, `ocr-sidecar`, `asr-sidecar`.
+`pip install "./server[s3,files,test]" "./client[test]" pytest-asyncio httpx` then, one process per area: `python -m pytest server`, `client`, `blob-sidecar`, `ocr-sidecar`, `asr-sidecar`, `caption-sidecar`.
 The tests use `file://` stores; nothing needs a running object store.
 
 MIT licence.
