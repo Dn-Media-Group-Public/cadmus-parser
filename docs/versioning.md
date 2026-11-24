@@ -13,3 +13,4 @@ limit name) do not.
   no GET of a job (read `status.json` / `index.json` from the output base); `index.json` is per input file and recursive; processors are entry points, ordered
   and dispatched per file; limits are per media class (`PARSE_LIMITS`, finite built-ins); renewals are pushed (`POST /jobs/renew`); sidecars speak
   `POST /process`; the ExifTool extension groups of the `files` processor are `Cadmus-<Format>` (formerly named after the first client).
+- **next minor**: new optional profile mode `auth: oauth2` in the ocr/asr/caption sidecars (nothing existing changes); their images also copy `common/upstream_auth.py`. See also: [Plan: OAuth2 upstream auth](implemented-plans/oauth2-upstream-auth.md)

@@ -115,3 +115,27 @@ def test_job_token_expires_and_failures_are_recorded():
     clock[0] = 1006.0
     assert u.resolve("x") is None
     assert TestClient(sidecar.make_app(PROFILES)).post("/admin/jobs", json={"job": "j", "profile": "lan"}).status_code in (401, 404)  # no admin token: no routes in use
+
+
+def test_oauth2_profile_fetches_a_token_and_a_token_failure_is_a_502():
+    import upstream_auth
+    upstream_auth._cache.clear()
+    prof = {"o": {"token": "to", "base_url": "https://llm.example/v1", "model": "m", "auth": "oauth2", "token_url": "https://idp.example/token",
+                  "client_id": "c", "client_secret": "S"}}
+    fail, seen = [False], []
+
+    def upstream(request: httpx.Request):
+        seen.append(request)
+        if request.url.host == "idp.example":
+            return httpx.Response(500, text="S") if fail[0] else httpx.Response(200, json={"access_token": "T", "expires_in": 300})
+        return httpx.Response(200, json={"choices": [{"message": {"content": "x"}}]})
+    c = TestClient(sidecar.make_app(prof, transport=httpx.MockTransport(upstream)))
+    h = {"Authorization": "Bearer to", "Content-Type": "image/png"}
+    assert c.post("/process", content=PNG, headers=h).text == "x" and seen[-1].headers["authorization"] == "Bearer T"
+    upstream_auth._cache.clear()
+    fail[0] = True
+    r = c.post("/process", content=PNG, headers=h)
+    assert r.status_code == 502 and r.json() == {"error": "oauth2 token: 500"}
+    assert egress_rules.endpoints(prof, lambda h: {"llm.example": "1.1.1.1", "idp.example": "2.2.2.2"}[h]) == [("1.1.1.1", 443), ("2.2.2.2", 443)]
+    with __import__("pytest").raises(ValueError):
+        sidecar.make_app({"o": {**prof["o"], "client_secret": ""}})

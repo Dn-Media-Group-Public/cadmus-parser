@@ -7,6 +7,6 @@ RUN apt-get update \
  && python3 -m venv /venv && /venv/bin/pip install --no-cache-dir uvicorn starlette httpx google-auth requests \
  && useradd --system --no-create-home caption
 ENV PATH=/venv/bin:$PATH
-COPY common/egress_rules.py common/usage.py caption-sidecar/app.py caption-sidecar/start.py /app/
+COPY common/egress_rules.py common/usage.py common/upstream_auth.py caption-sidecar/app.py caption-sidecar/start.py /app/
 EXPOSE 8080
 ENTRYPOINT ["tini", "--", "python", "/app/start.py"]

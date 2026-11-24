@@ -3,7 +3,7 @@ body (PNG/JPEG, already downscaled by the parser), `Content-Type` its type and `
 profile's OpenAI-compatible endpoint and the transcript comes back as the `text/plain` body. It forwards no request header, takes no URL and no
 path, has no blob access and never decodes an image. The token picks the profile, so a parser can only reach the profile its job was given.
 Errors are JSON `{"error": "..."}` with standard status codes (401, 413, 415, 502, 503). With OCR_ADMIN_TOKEN set it also reports per-job usage (common/usage.py). OCR_PROFILES: {name: {token, base_url, model,
-auth: none|bearer|google, api_key?, audience?, prompt?}} (JSON)."""
+auth: none|bearer|google|oauth2, api_key?, audience?, token_url?, client_id?, client_secret?, client_secret_env?, scope?, token_auth?, prompt?}} (JSON)."""
 
 import asyncio
 import base64
@@ -18,7 +18,8 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse
 from starlette.routing import Route
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "common"))  # the image has usage.py beside this file
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "common"))  # the image has usage.py and upstream_auth.py beside this file
+import upstream_auth  # noqa: E402
 from usage import Usage  # noqa: E402
 
 IMAGE_TYPES = ("image/png", "image/jpeg")
@@ -37,20 +38,9 @@ def profile_for(profiles: dict, auth_header: str, usage: Usage | None = None) ->
     return found
 
 
-async def upstream_headers(p: dict) -> dict:
-    mode = p.get("auth", "none")
-    if mode == "bearer":
-        return {"Authorization": f"Bearer {p['api_key']}"}
-    if mode == "google":  # an ID token for the endpoint's audience, from the metadata server or the service account
-        import google.auth.transport.requests
-        import google.oauth2.id_token
-        tok = await asyncio.to_thread(google.oauth2.id_token.fetch_id_token, google.auth.transport.requests.Request(), p["audience"])
-        return {"Authorization": f"Bearer {tok}"}
-    return {}
-
-
 def make_app(profiles: dict, max_body: int = 10 << 20, max_concurrent: int = 4, timeout: float = 120, transport=None, admin_token: str | None = None,
              max_calls: int = 20000) -> Starlette:
+    upstream_auth.validate(profiles)
     usage = Usage(admin_token, max_calls)
     busy = asyncio.Semaphore(max_concurrent)
 
@@ -77,14 +67,16 @@ def make_app(profiles: dict, max_body: int = 10 << 20, max_concurrent: int = 4, 
             call = {"feature": "ocr", "profile": next(n for n, v in profiles.items() if v is p), "model": p["model"], "unit": "tokens"}
             try:
                 async with httpx.AsyncClient(timeout=timeout, transport=transport) as c:
-                    r = await c.post(p["base_url"].rstrip("/") + "/chat/completions", headers=await upstream_headers(p),
-                                     json={"model": p["model"], "messages": [msg], "temperature": 0})
+                    r = await upstream_auth.post(c, p, p["base_url"].rstrip("/") + "/chat/completions",
+                                                  json={"model": p["model"], "messages": [msg], "temperature": 0})
                     r.raise_for_status()
                     data = r.json()
                     text = data["choices"][0]["message"]["content"] or ""
                     u = data.get("usage") or {}
                     usage.record(job, **call, outcome="ok", input=u.get("prompt_tokens", 0), output=u.get("completion_tokens", 0))
                     return PlainTextResponse(text)
+            except upstream_auth.TokenError as e:  # never reached the model: no usage row
+                return JSONResponse({"error": str(e)}, 502)
             except Exception as e:  # noqa: BLE001  the parser keeps its Tesseract text and notes why
                 usage.record(job, **call, outcome="error", input=0, output=0)
                 return JSONResponse({"error": f"upstream failed ({type(e).__name__})"}, 502)

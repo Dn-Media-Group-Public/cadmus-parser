@@ -53,11 +53,14 @@ def pinned_rules(uid: int, resolvers: list[str], endpoints: list[tuple[str, int]
 
 
 def endpoints(profiles: dict, resolve) -> list[tuple[str, int]]:
-    """(ip, port) of every profile's base_url, plus the metadata server for `google` profiles; `resolve(host) -> ip`."""
+    """(ip, port) of every profile's base_url, plus the `token_url` of `oauth2` profiles and the metadata server for `google` profiles; `resolve(host) -> ip`."""
     out = []
     for p in profiles.values():
         u = urlparse(p["base_url"])
         out.append((resolve(u.hostname), u.port or (443 if u.scheme == "https" else 80)))
+        if p.get("auth") == "oauth2":  # the token host too
+            t = urlparse(p["token_url"])
+            out.append((resolve(t.hostname), t.port or (443 if t.scheme == "https" else 80)))
         if p.get("auth") == "google":
             out.append(("169.254.169.254", 80))
     return list(dict.fromkeys(out))

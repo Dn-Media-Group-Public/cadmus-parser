@@ -1,6 +1,7 @@
 # Plan: OAuth2 client-credentials auth for the model sidecars
 
-> **Status: draft. Proposals below are open for decision; nothing is agreed. Do not implement.**
+> **Status: implemented.** The open questions were resolved with the suggested defaults: `client_secret_env` supported (wins over `client_secret`); `token_auth: post|basic`; client credentials only; TLS unchanged.
+> Deviation: the token request reuses the model call's `httpx` client; `upstream_auth.post(c, profile, url, **kw)` does header + one 401/403 retry. `egress_rules.endpoints` also pins `token_url`.
 > Independent of the other plans; the first consumer is article-graph (`docs/plans/remove-llm-token-proxy.md` there).
 
 ## Problem / Goal

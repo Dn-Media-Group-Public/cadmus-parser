@@ -49,9 +49,14 @@ what it contains, is the sidecar's own decision: it knows what could leak.
 Each sidecar defines its own size cap, concurrency and timeouts; there are no protocol-wide numbers. It **must** enforce some request-size limit and answer `413`
 when it is exceeded, answer `503` when it is busy, and serve `GET /health`.
 
+## Upstream auth
+
+A sidecar that calls a model endpoint authenticates with its profile's `auth`: `none`, `bearer`, `google` or `oauth2` (client credentials, token cached and refreshed by the sidecar);
+one implementation, `common/upstream_auth.py`. Fields: [reference](reference.md). See also: [Plan: OAuth2 upstream auth](implemented-plans/oauth2-upstream-auth.md)
+
 ## Egress
 
 A sidecar that reaches an upstream should pin its own egress (iptables rules applied at start as root with `NET_ADMIN`, then dropped): see
-`common/egress_rules.py` (`pinned_rules` for a fixed set of endpoints, `public_rules` for a proxy). Put it on an internal network shared only with the parser.
+`common/egress_rules.py` (`pinned_rules` for a fixed set of endpoints (the model hosts and, for `oauth2` profiles, the token host), `public_rules` for a proxy). Put it on an internal network shared only with the parser.
 
 There is a written spec only: no conformance suite and no skeleton service. The library's own sidecars have unit tests (`ocr-sidecar/tests`, `asr-sidecar/tests`, `caption-sidecar/tests`).

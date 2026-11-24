@@ -3,7 +3,7 @@ fallback: those are processors (server/cadmus_parser_server/caption.py). POST /p
 - an image: the body is the image (`Content-Type: image/*`);
 - a video window: `Content-Type: multipart/mixed`, one `image/*` part per keyframe in order, and `X-Frame-Times: 0.0,3.4,...` (seconds, one per part).
 Answer: JSON `{"text", "finish_reason", "block_reason", "model"}`. Errors are JSON `{"error": ...}` (400, 401, 413, 415, 502, 503).
-CAPTION_PROFILES: {name: {token, base_url, model, auth: none|bearer|google, api_key?, audience?, prompt?, max_output_tokens?}} (JSON; chat completions with
+CAPTION_PROFILES: {name: {token, base_url, model, auth: none|bearer|google|oauth2, api_key?, audience?, token_url?, client_id?, client_secret?, client_secret_env?, scope?, token_auth?, prompt?, max_output_tokens?}} (JSON; chat completions with
 `image_url` data URIs). CAPTION_ADMIN_TOKEN enables usage reporting."""
 
 import asyncio
@@ -21,7 +21,8 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "common"))  # the image has usage.py beside this file
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "common"))  # the image has usage.py and upstream_auth.py beside this file
+import upstream_auth  # noqa: E402
 from usage import Usage  # noqa: E402
 
 MAX_FRAMES = 20
@@ -46,18 +47,6 @@ def _profile_for(profiles: dict, auth_header: str, usage: Usage | None):
     return found
 
 
-async def upstream_headers(p: dict) -> dict:
-    mode = p.get("auth", "none")
-    if mode == "bearer":
-        return {"Authorization": f"Bearer {p['api_key']}"}
-    if mode == "google":  # an ID token for the endpoint's audience
-        import google.auth.transport.requests
-        import google.oauth2.id_token
-        tok = await asyncio.to_thread(google.oauth2.id_token.fetch_id_token, google.auth.transport.requests.Request(), p["audience"])
-        return {"Authorization": f"Bearer {tok}"}
-    return {}
-
-
 def split_frames(ctype_header: str, body: bytes) -> list:
     """[(content type, bytes)] of the image parts of a multipart body; ValueError if it is not one."""
     msg = email.message_from_bytes(b"Content-Type: " + ctype_header.encode() + b"\r\n\r\n" + body, policy=email.policy.HTTP)
@@ -73,7 +62,7 @@ async def call_upstream(c: httpx.AsyncClient, p: dict, frames: list, times: list
         if times:
             content.append({"type": "text", "text": f"[{mmss(times[i])}]"})
         content.append({"type": "image_url", "image_url": {"url": f"data:{ct};base64,{base64.b64encode(data).decode()}"}})
-    r = await c.post(p["base_url"].rstrip("/") + "/chat/completions", headers=await upstream_headers(p), json={
+    r = await upstream_auth.post(c, p, p["base_url"].rstrip("/") + "/chat/completions", json={
         "model": p["model"], "messages": [{"role": "user", "content": content}], "temperature": 0, "max_tokens": int(p.get("max_output_tokens") or 2048)})
     r.raise_for_status()
     d = r.json()
@@ -84,6 +73,7 @@ async def call_upstream(c: httpx.AsyncClient, p: dict, frames: list, times: list
 
 def make_app(profiles: dict, max_body: int = 32 << 20, max_concurrent: int = 4, timeout: float = 120, transport=None, admin_token: str | None = None,
              max_calls: int = 20000) -> Starlette:
+    upstream_auth.validate(profiles)
     usage = Usage(admin_token, max_calls)
     busy = asyncio.Semaphore(max_concurrent)
 
@@ -121,6 +111,8 @@ def make_app(profiles: dict, max_body: int = 32 << 20, max_concurrent: int = 4, 
             try:
                 async with httpx.AsyncClient(timeout=timeout, transport=transport) as c:
                     answer, u = await call_upstream(c, p, frames, times)
+            except upstream_auth.TokenError as e:  # never reached the model: no usage row
+                return JSONResponse({"error": str(e)}, 502)
             except Exception as e:  # noqa: BLE001  the processor counts the attempt as failed
                 usage.record(job, **call, outcome="error", unit="tokens", input=0, output=0)
                 return JSONResponse({"error": f"upstream failed ({type(e).__name__})"}, 502)

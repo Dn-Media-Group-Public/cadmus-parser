@@ -2,7 +2,7 @@
 processors (server/cadmus_parser_server/asr.py). POST /process with the audio as the body (`Content-Type: audio/*`), `Authorization: Bearer <token>`, options
 as `X-Chunk-Seconds`, `X-Language`, `X-Context` (percent-encoded UTF-8). Answer: JSON `{"segments": [...] | null, "raw": "..." | null, "finish_reason", "block_reason",
 "model", "language"}`: `segments` from the `transcriptions` backend, `raw` (the model's text, a JSON `{"segments": [...]}`) from `chat`.
-ASR_PROFILES: {name: {token, base_url, model, backend: transcriptions|chat, auth: none|bearer|google, api_key?, audience?, prompt?, max_output_tokens?,
+ASR_PROFILES: {name: {token, base_url, model, backend: transcriptions|chat, auth: none|bearer|google|oauth2, api_key?, audience?, token_url?, client_id?, client_secret?, client_secret_env?, scope?, token_auth?, prompt?, max_output_tokens?,
 audio_format?, response_format?, form?}} (JSON). Errors are JSON `{"error": ...}` (401, 413, 415, 502, 503). ASR_ADMIN_TOKEN enables usage reporting."""
 
 import asyncio
@@ -19,7 +19,8 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "common"))  # the image has usage.py beside this file
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "common"))  # the image has usage.py and upstream_auth.py beside this file
+import upstream_auth  # noqa: E402
 from usage import Usage  # noqa: E402
 
 PROMPT = ("Transcribe the audio verbatim, in the language spoken. Label each speaker consistently as \"Person 1\", \"Person 2\", ... for the whole recording. "
@@ -45,18 +46,6 @@ def _profile_for(profiles: dict, auth_header: str, usage: Usage | None):
     return found
 
 
-async def upstream_headers(p: dict) -> dict:
-    mode = p.get("auth", "none")
-    if mode == "bearer":
-        return {"Authorization": f"Bearer {p['api_key']}"}
-    if mode == "google":  # an ID token for the endpoint's audience
-        import google.auth.transport.requests
-        import google.oauth2.id_token
-        tok = await asyncio.to_thread(google.oauth2.id_token.fetch_id_token, google.auth.transport.requests.Request(), p["audience"])
-        return {"Authorization": f"Bearer {tok}"}
-    return {}
-
-
 def chat_prompt(p: dict, seconds: float, language: str, context: str) -> str:
     text = p.get("prompt") or PROMPT
     if seconds > 0:
@@ -70,12 +59,12 @@ def chat_prompt(p: dict, seconds: float, language: str, context: str) -> str:
 
 async def call_upstream(c: httpx.AsyncClient, p: dict, audio: bytes, ctype: str, seconds: float, language: str, context: str) -> tuple[dict, dict]:
     """(answer for the processor, upstream usage dict)."""
-    base, headers = p["base_url"].rstrip("/"), await upstream_headers(p)
+    base = p["base_url"].rstrip("/")
     if p.get("backend", "transcriptions") == "chat":
         fmt = p.get("audio_format") or "ogg"
         content = [{"type": "text", "text": chat_prompt(p, seconds, language, context)},
                    {"type": "input_audio", "input_audio": {"data": base64.b64encode(audio).decode(), "format": fmt}}]
-        r = await c.post(base + "/chat/completions", headers=headers, json={
+        r = await upstream_auth.post(c, p, base + "/chat/completions", json={
             "model": p["model"], "messages": [{"role": "user", "content": content}], "temperature": 0, "max_tokens": int(p.get("max_output_tokens") or 32768),
             "response_format": {"type": "json_schema", "json_schema": {"name": "transcript", "strict": True, "schema": SCHEMA}}})
         r.raise_for_status()
@@ -89,7 +78,7 @@ async def call_upstream(c: httpx.AsyncClient, p: dict, audio: bytes, ctype: str,
         form["language"] = language
     if context:
         form["prompt"] = context
-    r = await c.post(base + "/audio/transcriptions", headers=headers, data=form, files={"file": ("chunk.opus", audio, ctype)})
+    r = await upstream_auth.post(c, p, base + "/audio/transcriptions", data=form, files={"file": ("chunk.opus", audio, ctype)})
     r.raise_for_status()
     d = r.json()
     segs = [{"start": s.get("start", 0), "speaker": s.get("speaker"), "text": s.get("text", "")} for s in d.get("segments") or [] if isinstance(s, dict)]
@@ -100,6 +89,7 @@ async def call_upstream(c: httpx.AsyncClient, p: dict, audio: bytes, ctype: str,
 
 def make_app(profiles: dict, max_body: int = 25 << 20, max_concurrent: int = 4, timeout: float = 600, transport=None, admin_token: str | None = None,
              max_calls: int = 20000) -> Starlette:
+    upstream_auth.validate(profiles)
     usage = Usage(admin_token, max_calls)
     busy = asyncio.Semaphore(max_concurrent)
 
@@ -131,6 +121,8 @@ def make_app(profiles: dict, max_body: int = 25 << 20, max_concurrent: int = 4, 
             try:
                 async with httpx.AsyncClient(timeout=timeout, transport=transport) as c:
                     answer, u = await call_upstream(c, p, body, ctype, seconds, language, context)
+            except upstream_auth.TokenError as e:  # never reached the model: no usage row
+                return JSONResponse({"error": str(e)}, 502)
             except Exception as e:  # noqa: BLE001  the processor counts the attempt as failed
                 usage.record(job, **call, outcome="error", unit="audio_seconds", input=0, output=0)
                 return JSONResponse({"error": f"upstream failed ({type(e).__name__})"}, 502)

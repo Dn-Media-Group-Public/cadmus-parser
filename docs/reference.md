@@ -189,7 +189,7 @@ Output, `asr/<file.rel>/transcript.json` (the processors' own record: advisory; 
 filter; `failed` = no usable text and not (only) blocked. The job's `asr-split` raises (a note on the input's entry) only if no chunk has text. `speaker_scope` is `partial`
 when two chunks' speaker labels could not be matched (no matchable speech in their overlap), so the same person may appear under several labels.
 
-The `asr-sidecar` profile table (`ASR_PROFILES`): `{name: {token, base_url, model, backend: "transcriptions" (default) | "chat", auth: none|bearer|google, api_key?, audience?, prompt?,
+The `asr-sidecar` profile table (`ASR_PROFILES`): `{name: {token, base_url, model, backend: "transcriptions" (default) | "chat", auth: none|bearer|google|oauth2, api_key?, audience?, prompt?,
 max_output_tokens? (chat, default 32768), audio_format? (chat, default "ogg"), response_format? (transcriptions, default "verbose_json"; "diarized_json" for speakers), form? (extra form fields)}}`.
 It makes one upstream call and does no retry, validation or fallback. `chat` exists for languages without a diarization model (the audio goes to an audio-capable LLM, the answer is
 JSON-schema constrained segments `{start: "MM:SS", speaker, text}`).
@@ -226,7 +226,14 @@ An image has one entry with `t_start = t_end = 0`; a window ends where the next 
 `blocked`), then the fallback; a unit nobody captioned keeps `outcome` `blocked` (every attempt) or `invalid`, empty `text`, and is noted on the input's entry; it never fails the job.
 The caption may use Markdown emphasis; the default prompt forbids raw HTML.
 
-The `caption-sidecar` profile table (`CAPTION_PROFILES`): `{name: {token, base_url, model, auth: none|bearer|google, api_key?, audience?, prompt?, max_output_tokens? (default 2048)}}`
+**Upstream auth of the model sidecars** (`ocr`, `asr`, `caption`; `auth` in each profile): `none`, `bearer` (`api_key`), `google` (ID token for `audience`) or `oauth2`, the OAuth2
+client-credentials grant: `token_url`, `client_id`, `client_secret` (or `client_secret_env`: the name of an environment variable holding it, which wins), `scope?`, `audience?`
+(sent as the `audience` form field), `token_auth?` (`post` default: credentials in the body; `basic`: HTTP Basic). The sidecar caches the token in memory per
+(`token_url`, `client_id`, `scope`, `audience`), refreshes it when fewer than max(30 s, 10 %) of its lifetime remain (no `expires_in`: 60 s), and on a 401/403 from the model drops
+it and retries once. A failing token endpoint answers `502 {"error": "oauth2 token: <status>"}` and writes no usage row. Missing `token_url`/`client_id`/secret fails the sidecar at start.
+The pinned egress of the sidecar also allows the `token_url` host. See also: [Plan: OAuth2 upstream auth](implemented-plans/oauth2-upstream-auth.md)
+
+The `caption-sidecar` profile table (`CAPTION_PROFILES`): `{name: {token, base_url, model, auth: none|bearer|google|oauth2, api_key?, audience?, prompt?, max_output_tokens? (default 2048)}}`
 (OpenAI-compatible chat completions, frames as `image_url` data URIs). `POST /process`: an image body (`image/*`), or `multipart/mixed` of up to 20 `image/*` parts with `X-Frame-Times`
 (seconds, comma separated, one per part); answer `{text, finish_reason, block_reason, model}`. One upstream call, no retry, validation or fallback.
 See also: [Plan: Caption](implemented-plans/05-caption.md)
