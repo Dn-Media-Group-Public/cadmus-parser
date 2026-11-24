@@ -132,7 +132,7 @@ network `<client>-parse` per client service that only that client and the parser
 | `PARSE_MEMBER_WORKERS` | parser | threads of `ctx.recurse_many` (default 4) |
 | `MAX_SYNTHETIC_MEMBERS` | parser | cap of synthetic members (chunks, windows) per job (default 10000); see [processor handoff](implemented-plans/01-processor-handoff.md) |
 | `MAX_ARCHIVE_MEMBERS` | parser | cap of nested index entries per job (default 50000), also used by the `files` processor |
-| `MAX_PARSE_BYTES`, `MAX_ARCHIVE_BYTES`, `METADATA_TIMEOUT`, `METADATA_MAX_MEM`, `METADATA_MAX_BYTES`, `OCR_TIMEOUT`, `OCR_LANGS`, `OCR_MIN_CONF`, `OCR_MIN_CHARS`, `OCR_DPI`, `OCR_MAX_PAGES`, `OCR_MAX_SIDE`, `OCR_TESSERACT_TIMEOUT` | parser (forwarded) | settings of the default `files` processor |
+| `MAX_PARSE_BYTES_FILES`, `MAX_PARSE_BYTES_IMAGE`, `MAX_PARSE_BYTES_VIDEO`, `MAX_PARSE_BYTES_SOUND` (each falls back to `MAX_PARSE_BYTES`; see [per-processor size caps](implemented-plans/parse-bytes-per-processor.md)), `MAX_PARSE_BYTES`, `MAX_ARCHIVE_BYTES`, `METADATA_TIMEOUT`, `METADATA_MAX_MEM`, `METADATA_MAX_BYTES`, `OCR_TIMEOUT`, `OCR_LANGS`, `OCR_MIN_CONF`, `OCR_MIN_CHARS`, `OCR_DPI`, `OCR_MAX_PAGES`, `OCR_MAX_SIDE`, `OCR_TESSERACT_TIMEOUT` | parser (forwarded) | settings of the default `files` processor |
 | `PARSE_REPLICAS`, `PARSE_MEMORY` | stack file | replicas (default 1) and memory limit per replica (default 8g) |
 | `OCR_MAX_BODY`, `OCR_MAX_CONCURRENT`, `OCR_TIMEOUT` | ocr-sidecar | its caps (see [the protocol](sidecar-protocol.md)) |
 

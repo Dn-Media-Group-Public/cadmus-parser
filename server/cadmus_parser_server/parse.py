@@ -11,7 +11,14 @@ import shutil
 
 from cadmus_parser_server import extract, metadata, ocr
 
-MAX_PARSE_BYTES = int(os.environ.get("MAX_PARSE_BYTES") or 50 * 1024 * 1024)  # stored files have no cap; parsing does
+
+
+def _max_bytes(family: str, default: int) -> int:
+    """Parse size cap of a processor family (0 = none): MAX_PARSE_BYTES_<FAMILY>, else MAX_PARSE_BYTES, else `default`. Read at import."""
+    return int(os.environ.get(f"MAX_PARSE_BYTES_{family}") or os.environ.get("MAX_PARSE_BYTES") or default)
+
+
+MAX_PARSE_BYTES_FILES = _max_bytes("FILES", 50 * 1024 * 1024)  # stored files have no cap; parsing does
 MAX_ARCHIVE_BYTES = int(os.environ.get("MAX_ARCHIVE_BYTES") or os.environ.get("MAX_ZIP_BYTES") or 4 * 1024**3)  # uncompressed, per archive
 MAX_ARCHIVE_MEMBERS = int(os.environ.get("MAX_ARCHIVE_MEMBERS") or os.environ.get("MAX_ZIP_MEMBERS") or 50_000)
 
@@ -34,7 +41,7 @@ def _ctype(file, ctx) -> str:
 
 
 def _small(file) -> bool:
-    return file.size <= MAX_PARSE_BYTES
+    return not MAX_PARSE_BYTES_FILES or file.size <= MAX_PARSE_BYTES_FILES
 
 
 def _is_html(file, ctype: str) -> bool:
@@ -68,14 +75,19 @@ class Metadata:
 
 
 class SizeCap:
-    """A file over MAX_PARSE_BYTES is stored and gets metadata only; the content processors do not accept it."""
+    """A file over MAX_PARSE_BYTES_FILES, or media over its MAX_PARSE_BYTES_{IMAGE,VIDEO,SOUND}, is stored and gets metadata only; the content processors do not accept it."""
     name, top_dirs, before, after = "sizecap", (), ("archives", "markdown", "binary", "html", "apk", "documents"), ("metadata",)
 
     def accepts(self, file) -> bool:
-        return not _small(file)
+        from cadmus_parser_server import media_decode  # lazy: media_decode imports _max_bytes from here
+        return not _small(file) or media_decode.over_cap(file) is not None
 
     def process(self, sink, file, ctx) -> None:
-        sink.note(f"{file.rel} not parsed ({file.size} bytes > MAX_PARSE_BYTES)")
+        from cadmus_parser_server import media_decode
+        if var := media_decode.over_cap(file):
+            sink.note(f"{file.rel} not decoded ({file.size} bytes > {var})")
+        if not _small(file):
+            sink.note(f"{file.rel} not parsed ({file.size} bytes > MAX_PARSE_BYTES_FILES)")
 
 
 class Archives:

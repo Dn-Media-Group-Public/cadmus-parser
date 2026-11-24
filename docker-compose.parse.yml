@@ -34,6 +34,10 @@ services:
       PARSE_TRACEBACKS: ${PARSE_TRACEBACKS:-}         # 1: unexpected failures carry a traceback in status.json and error bodies
       # settings of the default `files` processor, forwarded to the parser when set (the code has the defaults)
       MAX_PARSE_BYTES: ${MAX_PARSE_BYTES:-}
+      MAX_PARSE_BYTES_FILES: ${MAX_PARSE_BYTES_FILES:-}
+      MAX_PARSE_BYTES_IMAGE: ${MAX_PARSE_BYTES_IMAGE:-}
+      MAX_PARSE_BYTES_VIDEO: ${MAX_PARSE_BYTES_VIDEO:-}
+      MAX_PARSE_BYTES_SOUND: ${MAX_PARSE_BYTES_SOUND:-}
       MAX_ARCHIVE_BYTES: ${MAX_ARCHIVE_BYTES:-}
       MAX_ARCHIVE_MEMBERS: ${MAX_ARCHIVE_MEMBERS:-}
       METADATA_TIMEOUT: ${METADATA_TIMEOUT:-}

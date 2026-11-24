@@ -7,3 +7,4 @@
 - [caption](05-caption.md) — `caption-sidecar` and the `caption-split`/`caption-primary`/`caption-fallback`/`caption-skip` processors; image and keyframe-window captions with validation and fallback
 - [frame-ocr](06-frame-ocr.md) — `frame-ocr` processor: OCR of a video's frame-store frames, deduplicated over time, `ocr.json`
 - [oauth2-upstream-auth](oauth2-upstream-auth.md) — `auth: oauth2` (client credentials, cached and refreshed) in the ocr/asr/caption sidecars, shared `common/upstream_auth.py`
+- [parse-bytes-per-processor](parse-bytes-per-processor.md) — `MAX_PARSE_BYTES_{FILES,IMAGE,VIDEO,SOUND}`, `MAX_PARSE_BYTES` as fallback; media over its cap is not decoded

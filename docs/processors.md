@@ -97,6 +97,9 @@ Options (`options["media-decode"]`): `thumb_side` (320), `keyframe_scene_thresho
 `web_rendition` (`auto` | `off`), `web_max_height` (720), `frame_passes` (default `["540@10", "full@0.5"]`; `<height|full>@<fps|full>`; fps >= 2 is H.264, below that all-intra MJPEG; `[]` = none).
 The frame store is large (a 2 h video: about 100 MB for `540@10`, 1 GB for `full@0.5` at 1080p): raise `output_mib` and, for long videos, `deadline_s` of the `video` class in `PARSE_LIMITS`.
 Needs `ffmpeg` (with libx264 and libopus) and, for images, `Pillow` and `pillow-heif` (both in the `files` extra).
+Size caps (operator env, read at import): `MAX_PARSE_BYTES_IMAGE`, `MAX_PARSE_BYTES_VIDEO`, `MAX_PARSE_BYTES_SOUND` (default 2 GiB each; `0` = no cap; the type is sniffed from the magic bytes). Over its cap a file is not decoded: it is stored and gets metadata only, and `sizecap` notes `<rel> not decoded (N bytes > MAX_PARSE_BYTES_VIDEO)`. The `files` processors are capped by `MAX_PARSE_BYTES_FILES` (default 50 MiB). Each variable that is unset or empty falls back to `MAX_PARSE_BYTES`, then the default. `asr`, `caption` and `frame-ocr` have none: they only act on `media-decode` output.
+See also: [Plan: per-processor size caps](implemented-plans/parse-bytes-per-processor.md)
+
 See also: [Plan: media decode](implemented-plans/02-media-decode.md)
 
 ## asr

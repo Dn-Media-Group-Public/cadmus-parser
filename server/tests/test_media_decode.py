@@ -108,3 +108,29 @@ def test_heic_becomes_png():
     Image.new("RGB", (64, 48), "red").save(f"{d}/i.heic")
     s = decode("original", open(f"{d}/i.heic", "rb").read())
     assert "media/original/web.png" in s.files and "media/original/thumb.jpg" in s.files
+
+
+def test_per_type_caps(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from cadmus_parser_server import parse
+    heads = {"image": b"\x89PNG\r\n\x1a\n" + b"\0" * 8, "video": b"\x1aE\xdf\xa3" + b"\0" * 12, "audio": b"ID3\x04" + b"\0" * 12}
+    names = {"image": "MAX_PARSE_BYTES_IMAGE", "video": "MAX_PARSE_BYTES_VIDEO", "audio": "MAX_PARSE_BYTES_SOUND"}
+    for kind, head in heads.items():
+        p = tmp_path / kind
+        p.write_bytes(head + b"x" * 100)
+        f = SimpleNamespace(path=str(p), size=116, index_address=None, rel=kind, depth=0)
+        assert md.MediaDecode().accepts(f) and md.over_cap(f) is None
+        monkeypatch.setitem(md.MAX_BYTES, kind, 115)  # over: skipped, only this type
+        assert not md.MediaDecode().accepts(f) and md.over_cap(f) == names[kind]
+        assert parse.SizeCap().accepts(f)
+        notes = []
+        parse.SizeCap().process(SimpleNamespace(note=notes.append), f, None)
+        assert notes == [f"{kind} not decoded (116 bytes > {names[kind]})"]
+        for other in set(heads) - {kind}:
+            assert md.MAX_BYTES[other] > 115
+        monkeypatch.setitem(md.MAX_BYTES, kind, 116)  # at the cap: decoded
+        assert md.MediaDecode().accepts(f)
+        monkeypatch.setitem(md.MAX_BYTES, kind, 0)  # 0 = no cap
+        assert md.MediaDecode().accepts(f)
+        monkeypatch.setitem(md.MAX_BYTES, kind, 2 * 1024**3)
+        assert md.MediaDecode().accepts(f)

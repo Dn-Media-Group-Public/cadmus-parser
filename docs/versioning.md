@@ -14,3 +14,4 @@ limit name) do not.
   and dispatched per file; limits are per media class (`PARSE_LIMITS`, finite built-ins); renewals are pushed (`POST /jobs/renew`); sidecars speak
   `POST /process`; the ExifTool extension groups of the `files` processor are `Cadmus-<Format>` (formerly named after the first client).
 - **next minor**: new optional profile mode `auth: oauth2` in the ocr/asr/caption sidecars (nothing existing changes); their images also copy `common/upstream_auth.py`. See also: [Plan: OAuth2 upstream auth](implemented-plans/oauth2-upstream-auth.md)
+- **next minor**: new operator variables `MAX_PARSE_BYTES_FILES`, `MAX_PARSE_BYTES_IMAGE`, `MAX_PARSE_BYTES_VIDEO`, `MAX_PARSE_BYTES_SOUND`; `MAX_PARSE_BYTES` is kept as their fallback. Behaviour change: `MAX_PARSE_BYTES` now also caps image, video and sound (default 2 GiB each). See also: [Plan: per-processor size caps](implemented-plans/parse-bytes-per-processor.md)
