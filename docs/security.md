@@ -54,3 +54,7 @@ Resource abuse is bounded by the operator's limits only (`PARSE_LIMITS`): every 
 
 A token selects a profile, and a profile is only what the job was given: a job can use no other profile. Sidecars hold the real endpoint credentials and have no
 store access; they pin their own egress. Keep tokens unique and different from `WRAPPER_TOKEN` and `PROXY_TOKEN`.
+
+## libmagic
+
+File type detection (`filetype.detect`) runs libmagic on untrusted bytes inside the sandboxed processor process, like exiftool and ffmpeg. See also: [Plan: file type detection](../implemented-plans/07-filetype-detection.md)

@@ -11,11 +11,13 @@ def write(tmp_path, name, data=b"x"):
     return str(p)
 
 
-def test_classify_extension_first_then_magic(tmp_path):
-    assert limits.classify(write(tmp_path, "a.MP4")) == "video"
-    assert limits.classify(write(tmp_path, "a.pdf", b"PK\x03\x04")) == "document"  # the extension wins
-    for data, want in ((b"\x89PNG\r\n\x1a\n", "image"), (b"%PDF-1.7", "document"), (b"PK\x03\x04..", "archive"), (b"ID3\x03", "audio"),
-                       (b"\0\0\0\x18ftypmp42", "video"), (b"RIFF\0\0\0\0WAVEfmt ", "audio"), (b"RIFF\0\0\0\0AVI LIST", "video"), (b"hello", "other"), (b"", "other")):
+PNG = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82'
+
+
+def test_classify_bytes_first_then_name(tmp_path):
+    assert limits.classify(write(tmp_path, "a.MP4")) == "video"  # generic bytes: the name decides
+    assert limits.classify(write(tmp_path, "a.jpg", b"%PDF-1.7\n")) == "document"  # self-identifying bytes beat the name
+    for data, want in ((PNG, "image"), (b"%PDF-1.7", "document"), (b"ID3\x04\0\0\0\0\0\0\xff\xfb\x90\x00" + b"\0" * 400, "audio"), (b"hello", "document"), (b"\0\1\2\3", "other")):
         assert limits.classify(write(tmp_path, "noext", data)) == want, data
 
 

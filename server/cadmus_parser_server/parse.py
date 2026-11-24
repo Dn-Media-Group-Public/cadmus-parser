@@ -5,19 +5,15 @@ network: the wrapper moves the bytes. Settings are the options of the family (`o
 HTML inputs), `ctypes` ({input name: content type}). Archives are unpacked here, in the sandboxed process; the members go back through the worker
 with `ctx.recurse` (they are parsed, never unpacked again)."""
 
-import mimetypes
 import os
 import shutil
 
 from cadmus_parser_server import extract, metadata, ocr
+from cadmus_parser_server.filetype import detect
 
 MAX_PARSE_BYTES = int(os.environ.get("MAX_PARSE_BYTES") or 50 * 1024 * 1024)  # stored files have no cap; parsing does
 MAX_ARCHIVE_BYTES = int(os.environ.get("MAX_ARCHIVE_BYTES") or os.environ.get("MAX_ZIP_BYTES") or 4 * 1024**3)  # uncompressed, per archive
 MAX_ARCHIVE_MEMBERS = int(os.environ.get("MAX_ARCHIVE_MEMBERS") or os.environ.get("MAX_ZIP_MEMBERS") or 50_000)
-
-
-def _guess(name: str) -> str:
-    return mimetypes.guess_type(name)[0] or "application/octet-stream"
 
 
 def _terse(sink, name: str, md: str) -> None:
@@ -30,7 +26,7 @@ def _opts(ctx) -> dict:
 
 
 def _ctype(file, ctx) -> str:
-    return (_opts(ctx).get("ctypes") or {}).get(file.rel) or _guess(file.name if file.depth else file.rel)
+    return (_opts(ctx).get("ctypes") or {}).get(file.rel) or detect(file.path, file.name)
 
 
 def _small(file) -> bool:

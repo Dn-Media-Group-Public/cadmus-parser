@@ -378,7 +378,7 @@ def test_limits_follow_the_classes_present(service):
     limit = {"default": {"ram_mib": 600, "fsize_mib": 7}, "video": {"ram_mib": 900}, "image": {"ram_mib": 700}}
     s = service(parser_cmd=hostile(code), limits=limit)
     for files, want in (({"a.pdf": b"%PDF"}, {"as": 600, "fsize": 7}), ({"a.png": b"x"}, {"as": 700, "fsize": 7}),
-                        ({"a.png": b"x", "b.mp4": b"x"}, {"as": 900, "fsize": 7}), ({"x": b"\x89PNG..."}, {"as": 700, "fsize": 7})):
+                        ({"a.png": b"x", "b.mp4": b"x"}, {"as": 900, "fsize": 7}), ({"x": b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82'}, {"as": 700, "fsize": 7})):
         j = s.job(files)
         j.post()
         assert j.wait()["status"] == "done"

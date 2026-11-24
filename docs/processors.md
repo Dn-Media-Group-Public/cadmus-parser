@@ -87,7 +87,7 @@ Drive the worker's `Runner` with an in-memory sink (see `server/tests/conftest.p
 
 ## media-decode
 
-Decodes an image, video or audio file once (recognised by magic bytes, not name) and writes, below `media/<file.rel>/`: `thumb.jpg` (image, video), `keyframes/<n>.jpg` +
+Decodes an image, video or audio file once (recognised by `filetype.detect`: libmagic on the bytes, the name only where the bytes are generic) and writes, below `media/<file.rel>/`: `thumb.jpg` (image, video), `keyframes/<n>.jpg` +
 `keyframes.json` (video; scene changes, at least one per `keyframe_max_gap_s`, none closer than `keyframe_min_gap_s`), `audio.opus` (mono 16 kHz; video with audio, audio),
 `web.mp4` / `web.m4a` / `web.png` (a browser-playable rendition, only when the original does not play; `renditions.json` says `original` otherwise), `frames/<resolution>-<fps>.mp4|.mkv`
 (video frame store, one file per `frame_passes` entry) and `decode.json`. A video is decoded by a single ffmpeg invocation with several outputs. The same files are left under
@@ -125,3 +125,9 @@ pointing at the original or its `web.png`) and calls `ctx.recurse_many(..., synt
 validates (`modelcheck.evaluate_text`) and keeps `caption.json` in its `ctx.dir()` and claims; on failure it leaves `attempt.json`. `caption-fallback` tries the other profile,
 `caption-skip` claims what is left with an empty, `blocked` or `invalid` result (there is no degraded text worth keeping). The parent writes the only output, `captions.json`.
 See also: [Plan: Caption](implemented-plans/05-caption.md)
+
+## Content type detection
+
+`filetype.detect(path, name)` is the one place that decides what a file is: libmagic (`python-magic`) on the whole file, refined by `mimetypes` on the file's name only where libmagic answers generically (`filetype.GENERIC`: octet-stream, plain ZIP/text, OLE, JSON/XML, empty). A name never overrides self-identifying bytes. `options.files.ctypes[rel]` still wins over both. `name` is the file's real name at any depth, so a consumer names its input (a prefix input holding `report.docx`) rather than passing a type. `limits.classify` and `media-decode` use the same detector.
+
+See also: [Plan: file type detection](../implemented-plans/07-filetype-detection.md)

@@ -8,6 +8,8 @@ import re
 import shutil
 import subprocess
 
+from cadmus_parser_server.filetype import detect
+
 DEFAULTS = {"thumb_side": 320, "keyframe_scene_threshold": 0.3, "keyframe_min_gap_s": 2.0, "keyframe_max_gap_s": 30.0, "max_keyframes": 0,
             "web_rendition": "auto", "web_max_height": 720, "frame_passes": ["540@10", "full@0.5"]}
 INTRA_BELOW_FPS = 2  # frame passes below this many fps are all-intra MJPEG (exact seeking), at or above H.264
@@ -19,20 +21,10 @@ _PASS = re.compile(r"^(full|\d+)@(full|\d+(?:\.\d+)?)$")
 
 # ---- pure helpers ---------------------------------------------------------------------------------------------------
 
-def sniff(head: bytes) -> str | None:
-    """'image' | 'video' | 'audio' | None from the first bytes (never the name: an input may be called `original`). Video may turn out audio-only at probe."""
-    if head[:8] == b"\x89PNG\r\n\x1a\n" or head[:3] == b"\xff\xd8\xff" or head[:4] == b"GIF8" or head[:2] == b"BM" or head[:4] in (b"II*\0", b"MM\0*"):
-        return "image"
-    if head[:4] == b"RIFF":
-        return {b"WEBP": "image", b"WAVE": "audio", b"AVI ": "video"}.get(head[8:12])
-    if head[4:8] == b"ftyp":
-        brand = head[8:12]
-        return "image" if brand in IMAGE_BRANDS else "audio" if brand in (b"M4A ", b"M4B ") else "video"
-    if head[:4] in (b"fLaC", b"OggS", b"FORM") or head[:3] == b"ID3" or (head[0:1] == b"\xff" and len(head) > 1 and head[1] & 0xE0 == 0xE0):
-        return "audio"
-    if head[:4] == b"\x1aE\xdf\xa3" or head[:3] == b"FLV" or head[:4] == b"\x30\x26\xb2\x75" or head[:3] == b"\x00\x00\x01":
-        return "video"
-    return None
+def sniff(path: str, name: str | None = None) -> str | None:
+    """'image' | 'video' | 'audio' | None by `detect`. Video may turn out audio-only at probe."""
+    major = detect(path, name).split("/")[0]
+    return major if major in ("image", "video", "audio") else None
 
 
 def parse_passes(specs) -> tuple:
@@ -228,8 +220,7 @@ class MediaDecode:
     def accepts(self, file) -> bool:
         if file.index_address is not None:  # a synthetic member (an ASR chunk) is already audio.opus
             return False
-        with open(file.path, "rb") as f:
-            return sniff(f.read(16)) is not None
+        return sniff(file.path, file.name) is not None
 
     def process(self, sink, file, ctx) -> None:
         notes: list = []
@@ -237,7 +228,7 @@ class MediaDecode:
         base = ctx.dir()
         with open(file.path, "rb") as f:
             head = f.read(16)
-        kind = sniff(head)
+        kind = sniff(file.path, file.name)
         d: dict = {"kind": kind}
         produced: dict = {}  # path below base -> content type
         try:

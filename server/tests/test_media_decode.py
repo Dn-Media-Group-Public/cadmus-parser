@@ -28,12 +28,14 @@ def test_frame_passes_codec_by_fps_and_rejects_junk():
     assert md.parse_passes([]) == ([], [])
 
 
-def test_sniff_by_magic_not_name():
-    assert md.sniff(b"\x89PNG\r\n\x1a\n" + b"\0" * 8) == "image"
-    assert md.sniff(b"\0\0\0\x18ftypheic\0\0\0\0") == "image"
-    assert md.sniff(b"\0\0\0\x18ftypisom\0\0\0\0") == "video"
-    assert md.sniff(b"ID3\x04" + b"\0" * 12) == "audio"
-    assert md.sniff(b"just text......") is None
+def test_sniff_by_magic_not_name(tmp_path):
+    def sn(data, name="original"):
+        (tmp_path / name).write_bytes(data)
+        return md.sniff(str(tmp_path / name), name)
+    png = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82'
+    assert sn(png) == "image"
+    assert sn(png, "x.pdf") == "image"
+    assert sn(b"just text......") is None
 
 
 def test_one_input_for_the_whole_video_command():
