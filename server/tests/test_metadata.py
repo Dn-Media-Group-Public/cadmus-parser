@@ -137,10 +137,10 @@ def test_dump_truncates(monkeypatch):
 def test_parse_writes_metadata_yaml(run, monkeypatch):
     s = run({"p.geojson": (GEOJSON, "application/geo+json")})
     assert yaml.safe_load(s.files["metadata/p.geojson.yaml"])["Cadmus-Vector"]["Layers"]
-    monkeypatch.setattr(parse, "MAX_PARSE_BYTES", 10)  # oversize: not parsed, still gets metadata
+    monkeypatch.setattr(parse, "MAX_PARSE_BYTES_FILES", 10)  # oversize: not parsed, still gets metadata
     s = run({"big.geojson": (GEOJSON, "application/geo+json")})
     assert "metadata/big.geojson.yaml" in s.files and "parsed/big.geojson.md" not in s.files and any("not parsed" in n for n in s.notes)
-    monkeypatch.setattr(parse, "MAX_PARSE_BYTES", 50 << 20)
+    monkeypatch.setattr(parse, "MAX_PARSE_BYTES_FILES", 50 << 20)
     b = io.BytesIO()
     with zipfile.ZipFile(b, "w") as z:
         z.writestr("m.geojson", GEOJSON)

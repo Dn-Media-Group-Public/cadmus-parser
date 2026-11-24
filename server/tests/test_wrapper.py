@@ -251,12 +251,14 @@ def test_parser_environment_has_no_secrets_and_only_the_requested_profile(servic
     # the operator's limits reach the parser (the only part of the wrapper's own environment that does), a lookalike secret does not
     monkeypatch.setenv("MAX_PARSE_BYTES", "12345")
     monkeypatch.setenv("METADATA_TIMEOUT", "7")
+    for n in ("FILES", "IMAGE", "VIDEO", "SOUND"):
+        monkeypatch.setenv(f"MAX_PARSE_BYTES_{n}", n)
     monkeypatch.setenv("MAX_ARCHIVE_BYTESX", "leak-me")
     j = s.job({"a.md": b"# a"})
     assert j.post().status_code == 202  # the slot of the job just seen done is already free
     j.wait()
     env = json.loads(j.index()["notes"])
-    assert env["MAX_PARSE_BYTES"] == "12345" and env["METADATA_TIMEOUT"] == "7" and "MAX_ARCHIVE_BYTESX" not in env
+    assert env["MAX_PARSE_BYTES"] == "12345" and env["METADATA_TIMEOUT"] == "7" and all(env[f"MAX_PARSE_BYTES_{n}"] == n for n in ("FILES", "IMAGE", "VIDEO", "SOUND")) and "MAX_ARCHIVE_BYTESX" not in env
 
 
 def test_duplicate_post_busy_pool_and_stale_heartbeat(service):

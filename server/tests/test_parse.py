@@ -135,9 +135,9 @@ def test_archive_limits(run, monkeypatch):
     s = run({"many.zip": many.getvalue()})
     assert "MAX_ARCHIVE_BYTES" in s.notes[0]
     assert sum(p.startswith("original/many.zip.d") for p in s.files) == 2  # written before the abort
-    monkeypatch.setattr(parse, "MAX_PARSE_BYTES", 10)  # stored (no cap) but not parsed
+    monkeypatch.setattr(parse, "MAX_PARSE_BYTES_FILES", 10)  # stored (no cap) but not parsed
     s = run({"big.html": (b"<p>" + b"x" * 50 + b"</p>", "text/html")})
-    assert s.notes == ["big.html not parsed (57 bytes > MAX_PARSE_BYTES)"] and not s.files
+    assert s.notes == ["big.html not parsed (57 bytes > MAX_PARSE_BYTES_FILES)"] and not s.files
 
 
 def test_binary_formats(run):
@@ -165,3 +165,15 @@ def test_binary_formats(run):
 def test_apk_is_not_parsed(run):
     s = run({"x.apk": (b"PK\3\4", "application/vnd.android.package-archive")})
     assert not [p for p in s.files if p.startswith("parsed/")]
+
+
+def test_max_bytes_resolution(monkeypatch):
+    for k in ("MAX_PARSE_BYTES", "MAX_PARSE_BYTES_X"):
+        monkeypatch.delenv(k, raising=False)
+    assert parse._max_bytes("X", 7) == 7
+    monkeypatch.setenv("MAX_PARSE_BYTES", "5")
+    assert parse._max_bytes("X", 7) == 5
+    monkeypatch.setenv("MAX_PARSE_BYTES_X", "3")
+    assert parse._max_bytes("X", 7) == 3
+    monkeypatch.setenv("MAX_PARSE_BYTES_X", "")  # empty = unset
+    assert parse._max_bytes("X", 7) == 5

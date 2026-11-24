@@ -9,14 +9,23 @@ import shutil
 import subprocess
 
 from cadmus_parser_server.filetype import detect
+from cadmus_parser_server.parse import _max_bytes
 
 DEFAULTS = {"thumb_side": 320, "keyframe_scene_threshold": 0.3, "keyframe_min_gap_s": 2.0, "keyframe_max_gap_s": 30.0, "max_keyframes": 0,
             "web_rendition": "auto", "web_max_height": 720, "frame_passes": ["540@10", "full@0.5"]}
+MAX_BYTES = {"image": _max_bytes("IMAGE", 2 * 1024**3), "video": _max_bytes("VIDEO", 2 * 1024**3), "audio": _max_bytes("SOUND", 2 * 1024**3)}  # by sniffed kind; 0 = no cap
+CAP_VAR = {"image": "MAX_PARSE_BYTES_IMAGE", "video": "MAX_PARSE_BYTES_VIDEO", "audio": "MAX_PARSE_BYTES_SOUND"}
 INTRA_BELOW_FPS = 2  # frame passes below this many fps are all-intra MJPEG (exact seeking), at or above H.264
 WEB_IMAGE = {"JPEG": "image/jpeg", "PNG": "image/png", "WEBP": "image/webp", "GIF": "image/gif"}
 WEB_AUDIO = {"mp3", "flac", "wav", "pcm_s16le", "pcm_s24le", "pcm_u8", "vorbis", "opus"}  # ffprobe codec names; AAC is checked with the container
 IMAGE_BRANDS = {b"heic", b"heix", b"mif1", b"msf1", b"avif", b"heim", b"heis"}
 _PASS = re.compile(r"^(full|\d+)@(full|\d+(?:\.\d+)?)$")
+
+
+def over_cap(file) -> str | None:
+    """Name of the MAX_PARSE_BYTES_* variable the file exceeds, if it is media over its cap."""
+    kind = sniff(file.path, file.name)
+    return CAP_VAR[kind] if kind and MAX_BYTES[kind] and file.size > MAX_BYTES[kind] else None
 
 
 # ---- pure helpers ---------------------------------------------------------------------------------------------------
@@ -220,7 +229,7 @@ class MediaDecode:
     def accepts(self, file) -> bool:
         if file.index_address is not None:  # a synthetic member (an ASR chunk) is already audio.opus
             return False
-        return sniff(file.path, file.name) is not None
+        return sniff(file.path, file.name) is not None and over_cap(file) is None
 
     def process(self, sink, file, ctx) -> None:
         notes: list = []
