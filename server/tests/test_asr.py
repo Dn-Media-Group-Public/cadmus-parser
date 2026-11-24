@@ -127,7 +127,7 @@ def test_primary_transcribes_every_chunk_and_the_merge_is_written(monkeypatch, f
     assert [(c["start"], c["end"], c["outcome"], c["role"], c["attempts"]) for c in t["chunks"]] == [(0, 330, "ok", "primary", 1), (300, 630, "ok", "primary", 1), (600, 700, "ok", "primary", 1)]
     assert t["language"] == "no" and t["duration"] == 700 and [x["chunk"] for x in t["segments"]] == [0, 2]
     assert [x["offset"] for x in t["segments"]] == [5, 690]  # every segment of chunk 1 (305, 620) falls in an overlap whose other half is kept from its neighbour
-    assert fake.calls[0][2] == "330.0" and set(f for f in s.files) == {"asr/original/transcript.json"}  # the one and only output
+    assert sorted(c[2] for c in fake.calls) == ["100.0", "330.0", "330.0"] and set(f for f in s.files) == {"asr/original/transcript.json"}  # the one and only output
     assert not s.notes
 
 
