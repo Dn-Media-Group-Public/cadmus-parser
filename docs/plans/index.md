@@ -5,6 +5,7 @@ They were written for the article-graph consumer (its `docs/plans/cadmus-parsing
 
 | Plan | Adds | Depends on |
 |---|---|---|
+| [`filetype-detection`](07-filetype-detection.md) | one detector (python-magic + extension); `input.name` names a single-object input | — |
 
 Implementation order: `processor-handoff` (done: [implemented](../implemented-plans/01-processor-handoff.md)) then `media-decode` (done: [implemented](../implemented-plans/02-media-decode.md)), and `sidecar-usage-reporting` (done: [implemented](../implemented-plans/03-sidecar-usage-reporting.md)), and `asr` (done: [implemented](../implemented-plans/04-asr.md)), and `caption` (done: [implemented](../implemented-plans/05-caption.md)), and `frame-ocr` (done: [implemented](../implemented-plans/06-frame-ocr.md)).
 
