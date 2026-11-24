@@ -6,7 +6,7 @@ The parser service (the wrapper, not your service) runs in its own image. It nee
 FROM debian:bookworm-slim
 ENV PATH=/venv/bin:$PATH
 ADD lib/cadmus-parser /cadmus
-RUN apt-get update && apt-get install -y --no-install-recommends libimage-exiftool-perl ffmpeg && rm -rf /var/lib/apt/lists/* \
+RUN apt-get update && apt-get install -y --no-install-recommends unar libimage-exiftool-perl ffmpeg flac tesseract-ocr tesseract-ocr-eng tesseract-ocr-nor && rm -rf /var/lib/apt/lists/* \
  && /cadmus/server/install.sh s3,files            # tini, util-linux, the `wrapper` uid, /scratch, a venv /venv, pip install of the server with these extras
 COPY toy/ /src/toy/
 RUN pip install --no-cache-dir /src/toy           # a processor package of your own (or only the default ones, from the `files` extra)
@@ -18,6 +18,7 @@ ENTRYPOINT ["tini", "--", "/cadmus/server/entrypoint.sh"]
 
 - `media-decode` (in `files`) needs `ffmpeg` with libx264 and libopus (Debian's has both) and installs `pillow-heif` (HEIC; a wheel that bundles libheif).
   See also: [Plan: media decode](implemented-plans/02-media-decode.md)
+- The system tools of the default processors: `unar` (rar and other archives), `exiftool`, `ffmpeg`/`ffprobe`, `flac` (markitdown's audio converter), `tesseract-ocr` plus one language pack per code in `OCR_LANGS` (default `nor+eng`). `server/Dockerfile` installs all of them; a missing tool degrades silently to a note in `status.json`.
 - `install.sh [extras]` takes the server's extras (`s3` default, `files` = the default processors, `gcs`); the source stays in `/cadmus` for later `pip install`s.
 - Install GCS support **after** the processors: `blackboxprotobuf` (used by `files`) pins a protobuf that `gcsfs` refuses, and pip then only warns.
 - The venv must stay world-readable (`chmod -R a+rX /venv`): the parser runs as a pool uid, not as the wrapper's uid.
