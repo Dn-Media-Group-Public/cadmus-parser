@@ -29,7 +29,7 @@ processor whose import fails (an extra that is not installed) is skipped with a 
 ## The default processors
 
 The `files` extra installs ten, one per kind of file or library: `metadata` (ExifTool, ffprobe, GDAL, OOXML, PDF history), `sizecap`, `archives`, `markdown`, `binary`
-(msgpack, CBOR, BSON, plist, protobuf), `html` (trafilatura), `apk`, `documents` (markitdown and OCR, the fallback) `members` (keeps unpacked archive members) and `media-decode`. `media-decode` is separate: it has its own options entry and never claims a file (see below). The others
+(msgpack, CBOR, BSON, plist, protobuf), `html` (trafilatura), `apk`, `documents` (markitdown and OCR, the fallback; an image gets `parsed/*.md` only from OCR, and none when OCR finds no text — [plan](implemented-plans/image-text-only-ocr.md)) `members` (keeps unpacked archive members) and `media-decode`. `media-decode` is separate: it has its own options entry and never claims a file (see below). The others
 share the options entry `files` (`base_url`, `ctypes`, read with `ctx.options_of("files")`) and use `before`/`after` and `ctx.claim()` to hand a file to exactly one
 content handler. They are the model for splitting your own.
 

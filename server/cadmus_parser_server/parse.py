@@ -193,11 +193,12 @@ class Documents:
 
     def process(self, sink, file, ctx) -> None:
         raw, path, ctype = _read(file), file.rel, _ctype(file, ctx)
-        try:
-            text = extract.file_to_markdown(raw, path)
-        except Exception as e:  # noqa: BLE001
-            sink.note(f"{path} not parsed ({type(e).__name__}: {e})")
-            text = ""
+        text = ""
+        if ctype not in ocr.IMAGE_TYPES:  # an image's markitdown text is only EXIF (already in metadata/): OCR alone decides
+            try:
+                text = extract.file_to_markdown(raw, path)
+            except Exception as e:  # noqa: BLE001
+                sink.note(f"{path} not parsed ({type(e).__name__}: {e})")
         text = ocr.maybe_ocr(raw, path, ctype, text, sink.note)
         if not text.strip():
             if b"\0" not in raw[:1024]:  # ponytail: NUL sniff; text nobody converted is still returned inline from the input

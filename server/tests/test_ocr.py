@@ -67,7 +67,7 @@ def test_remote_failure_keeps_tesseract(monkeypatch):
 def test_oversize_image_noted_not_failed(monkeypatch):
     monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", 1000)
     n = []
-    assert run(n) == "EXIF" and "too large" in n[0]
+    assert run(n) == "" and "too large" in n[0]
 
 
 def test_pdf_only_scanned_page_is_ocrd(monkeypatch):
@@ -126,3 +126,35 @@ def test_ocr_client_talks_to_the_sidecar(monkeypatch):
             ocr.remote_ocr(b"\x89PNG")
     finally:
         srv.should_exit = True
+
+
+class Sink:
+    def __init__(self):
+        self.notes, self.files, self.infos = [], {}, []
+
+    def note(self, m): self.notes.append(m)
+    def info(self, **k): self.infos.append(k)
+    def put_bytes(self, p, b, ct): self.files[p] = b
+
+
+def documents(monkeypatch, tmp_path, words):
+    from types import SimpleNamespace as NS
+    from cadmus_parser_server import extract, parse
+
+    f = tmp_path / "a.png"
+    f.write_bytes(png())
+    monkeypatch.setattr(parse, "_ctype", lambda file, ctx: "image/png")
+    monkeypatch.setattr(extract, "file_to_markdown", lambda *a: pytest.fail("markitdown must not run for images"))
+    monkeypatch.setattr(ocr, "ocr_image", lambda img: (words, "fake"))
+    s = Sink()
+    parse.Documents().process(s, NS(path=str(f), rel="a.png", size=1), None)
+    return s
+
+
+def test_image_without_text_writes_nothing(monkeypatch, tmp_path):
+    s = documents(monkeypatch, tmp_path, "")
+    assert s.files == {} and s.infos == [] and s.notes == ["a.png: ocr fake"]
+
+
+def test_image_with_text_writes_md(monkeypatch, tmp_path):
+    assert documents(monkeypatch, tmp_path, "Hello").files["parsed/a.png.md"] == b"Hello"

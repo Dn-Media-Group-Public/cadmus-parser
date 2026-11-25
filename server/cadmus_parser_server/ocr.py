@@ -89,7 +89,7 @@ def maybe_ocr(raw: bytes, path: str, ctype: str, text: str, note) -> str:
 
             out, how = ocr_image(Image.open(io.BytesIO(raw)))
             note(f"{path}: ocr {how}")
-            return out if out.strip() else text
+            return out
         if ctype == "application/pdf" or low.endswith(".pdf"):
             return _pdf(raw, path, text, note)
     except ImportError as e:
