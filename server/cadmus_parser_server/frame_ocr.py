@@ -113,3 +113,5 @@ class FrameOcr:
         if capped:
             sink.note(f"frame-ocr: {file.rel}: stopped after {o['max_frames']} OCR runs at {entries[-1]['t_end'] if entries else 0:.0f}s")
         sink.put_bytes(f"frame-ocr/{file.rel}/ocr.json", json.dumps(entries).encode(), "application/json")
+        with open(os.path.join(ctx.dir(), "ocr.json"), "w") as f:  # scratch copy for media-markdown
+            json.dump(entries, f)

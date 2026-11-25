@@ -267,6 +267,8 @@ class AsrSplit:
         doc = {"language": o["language"] or next((l for l in langs if l), None), "speaker_scope": scope, "duration": duration,
                "chunks": infos, "segments": [{**s, "offset": round(s["offset"], 1)} for s in segments]}
         sink.put_bytes(f"asr/{file.rel}/transcript.json", json.dumps(doc).encode(), "application/json")
+        with open(os.path.join(base, "transcript.json"), "w") as f:  # scratch copy for media-markdown
+            json.dump(doc, f)
         if not any(s["text"] for s in segments):
             reasons = sorted({i.get("reason") or i["outcome"] for i in infos})
             raise RuntimeError(f"asr: no text from any chunk ({'; '.join(reasons)})"[:500])

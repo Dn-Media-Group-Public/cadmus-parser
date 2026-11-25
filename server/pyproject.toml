@@ -38,6 +38,7 @@ caption-split = "cadmus_parser_server.caption:CaptionSplit"
 caption-primary = "cadmus_parser_server.caption:CaptionPrimary"
 caption-fallback = "cadmus_parser_server.caption:CaptionFallback"
 caption-skip = "cadmus_parser_server.caption:CaptionSkip"
+media-markdown = "cadmus_parser_server.media_markdown:MediaMarkdown"
 
 [tool.setuptools.packages.find]
 include = ["cadmus_parser_server*"]

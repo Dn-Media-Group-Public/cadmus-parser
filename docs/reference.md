@@ -237,3 +237,8 @@ The `caption-sidecar` profile table (`CAPTION_PROFILES`): `{name: {token, base_u
 (OpenAI-compatible chat completions, frames as `image_url` data URIs). `POST /process`: an image body (`image/*`), or `multipart/mixed` of up to 20 `image/*` parts with `X-Frame-Times`
 (seconds, comma separated, one per part); answer `{text, finish_reason, block_reason, model}`. One upstream call, no retry, validation or fallback.
 See also: [Plan: Caption](implemented-plans/05-caption.md)
+
+## media-markdown
+
+For an image, video or audio file decoded by `media-decode`, `media-markdown` writes one time-interleaved `parsed/<rel>.md` (+ `terse/<rel>.md`) from whichever of `asr`, `caption` and `frame-ocr` produced a result. Sections are `## h:mm:ss` windows (the caption windows when captions exist, else fixed windows; option `options["media-markdown"]`: `window_seconds`, default 30), each with `**Scene:**` (caption), `**On screen:**` (frame OCR) and `**Speech:**` (ASR). An image gets its caption, then its OCR text. Nothing is written when no part exists; the file is still claimed, so `documents` never sees media. The three JSON outputs are unchanged.
+See also: [Plan: media-markdown](implemented-plans/media-markdown.md)

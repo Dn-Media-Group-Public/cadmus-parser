@@ -10,3 +10,4 @@
 - [filetype-detection](07-filetype-detection.md) — `filetype.detect`: libmagic on the bytes, the name only where the bytes are generic
 - [parse-bytes-per-processor](parse-bytes-per-processor.md) — `MAX_PARSE_BYTES_{FILES,IMAGE,VIDEO,SOUND}`, `MAX_PARSE_BYTES` as fallback; media over its cap is not decoded
 - [image-text-only-ocr](image-text-only-ocr.md) — images get `parsed/*.md` only when OCR finds text (no EXIF fallback)
+- [media-markdown](media-markdown.md) — `media-markdown` processor: one time-interleaved `parsed/*.md` for images, video and audio

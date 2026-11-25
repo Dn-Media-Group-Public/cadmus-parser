@@ -203,4 +203,7 @@ class CaptionSplit:
             if rec["outcome"] != "ok":
                 sink.note(f"caption: {file.rel} {u['t_start']:.0f}s left out ({rec['outcome']}: {'; '.join(rec.get('reasons') or [])})"[:1000])
             captions.append({"t_start": u["t_start"], "t_end": u["t_end"], "text": rec["text"], "outcome": rec["outcome"], "role": rec["role"], "model": rec["model"], "frames": u["frames"]})
-        sink.put_bytes(f"caption/{file.rel}/captions.json", json.dumps({"kind": kind, "captions": captions}).encode(), "application/json")
+        out = json.dumps({"kind": kind, "captions": captions}).encode()
+        sink.put_bytes(f"caption/{file.rel}/captions.json", out, "application/json")
+        with open(os.path.join(base, "captions.json"), "wb") as f:  # scratch copy for media-markdown
+            f.write(out)

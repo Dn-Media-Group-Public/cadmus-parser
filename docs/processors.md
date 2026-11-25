@@ -134,3 +134,8 @@ See also: [Plan: Caption](implemented-plans/05-caption.md)
 `filetype.detect(path, name)` is the one place that decides what a file is: libmagic (`python-magic`) on the whole file, refined by `mimetypes` on the file's name only where libmagic answers generically (`filetype.GENERIC`: octet-stream, plain ZIP/text, OLE, JSON/XML, empty). A name never overrides self-identifying bytes. `options.files.ctypes[rel]` still wins over both. `name` is the file's real name at any depth, so a consumer names its input (a prefix input holding `report.docx`) rather than passing a type. `limits.classify` and `media-decode` use the same detector.
 
 See also: [Plan: file type detection](../implemented-plans/07-filetype-detection.md)
+
+## media-markdown
+
+`media-markdown` (after `media-decode`, `asr-split`, `caption-split` and `frame-ocr`; `before` the content handlers) claims every file media-decode decoded as image, video or audio and writes `parsed/<rel>.md` (see [reference](reference.md#media-markdown)). `asr-split`, `caption-split` and `frame-ocr` also leave a scratch copy of their JSON result in their own `ctx.dir()`, which it reads; a feature that did not run or failed leaves none and its part is omitted. Image OCR (`ocr.maybe_ocr`) runs here instead of in `documents`.
+See also: [Plan: media-markdown](implemented-plans/media-markdown.md)
