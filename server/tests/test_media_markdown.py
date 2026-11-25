@@ -12,22 +12,21 @@ OCR = [{"t_start": 5, "text": "HELLO"}, {"t_start": 45, "text": "BYE"}]
 SEG = [{"offset": 3, "text": "hi", "speaker": "Person 1"}, {"offset": 42, "text": "meow"}]
 
 
-def test_all_three_by_caption_windows():
+def test_all_three_in_time_order():
     md = mm.build_markdown("video", CAP, OCR, SEG)
-    assert md.index("**Scene:** A room.") < md.index("HELLO") < md.index("Person 1: hi") < md.index("## 0:40") < md.index("A cat.") < md.index("BYE") < md.index("meow")
-    assert "## 0:20" not in md and md.count("**Scene:**") == 2  # the blocked unit has a window but no text, so no section
+    assert md.split("\n\n") == ["`0:00` _SCENE_: A room.", "`0:03` **Person 1**: hi", "`0:05` _ON SCREEN_: HELLO", "`0:40` _SCENE_: A cat.",
+                                  "`0:42` meow", "`0:45` _ON SCREEN_: BYE"]  # the blocked caption is left out; no speaker, no name
 
 
-def test_fixed_windows_and_single_parts():
-    assert "## 0:30" in mm.build_markdown("video", [], [], [{"offset": 31, "text": "x"}]) and "## 0:00" not in mm.build_markdown("video", [], [], [{"offset": 31, "text": "x"}])
-    assert mm.build_markdown("audio", [], [], SEG).count("**Speech:**") == 2 and "On screen" not in mm.build_markdown("video", [], [], SEG)
-    assert "**On screen:** HELLO" in mm.build_markdown("video", [], OCR, [])
+def test_single_parts_and_multiline_ocr():
+    assert mm.build_markdown("audio", [], [], SEG).count("**") == 2 and "ON SCREEN" not in mm.build_markdown("video", [], [], SEG)
+    assert mm.build_markdown("video", [], [{"t_start": 3725, "text": "A\n\nB"}], []) == "`1:02:05` _ON SCREEN_: A / B"
     assert mm.build_markdown("video", [], [], []) == ""
 
 
 def test_image():
-    assert mm.build_markdown("image", CAP[:1], [], [], image_text="Hello") == "**Scene:** A room.\n\nHello"
-    assert mm.build_markdown("image", [], [], [], image_text="Hello") == "Hello"
+    assert mm.build_markdown("image", CAP[:1], [], [], "Hello") == "_SCENE_: A room.\n\n_ON SCREEN_: Hello"
+    assert mm.build_markdown("image", [], [], [], "Hello") == "_ON SCREEN_: Hello"
 
 
 def run(tmp_path, name, decode, scratch, monkeypatch=None):
@@ -57,4 +56,4 @@ def test_processor(tmp_path):
 def test_image_with_caption(tmp_path, monkeypatch):
     monkeypatch.setattr(mm.ocr, "maybe_ocr", lambda *a: "Hello")
     s = run(tmp_path, "a.png", {"kind": "image"}, [("caption-split", "captions.json", {"captions": CAP[:1]})])
-    assert s.files["parsed/a.png.md"] == b"**Scene:** A room.\n\nHello"
+    assert s.files["parsed/a.png.md"] == b"_SCENE_: A room.\n\n_ON SCREEN_: Hello"
