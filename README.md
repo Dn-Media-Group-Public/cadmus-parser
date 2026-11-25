@@ -25,6 +25,10 @@ consuming stack.
 
 OCR fallback, ASR and captioning call remote models, always through a sidecar.
 
+A **profile** is a named, operator-configured way of reaching one model: the endpoint, the model, how to authenticate, and a prompt, all kept in the sidecar. A job asks for a
+profile by name and never sees or sets the details. Examples: `lan` (a self-hosted OCR server on the local network), a Whisper-style `transcriptions` endpoint for ASR, a
+`chat` model with audio input as the ASR fallback, or a hosted vision model for captions.
+
 - **You choose the profile per job.** `features` in the job (`{"asr": "<profile>", "asr-fallback": "<profile>", "caption": "<profile>", "ocr": "<profile>"}`) names which
   model profile each feature uses, and a fallback can be a different one; the parser gets only the profile its job asked for. Profiles (endpoint, model, auth, prompt) are
   defined by the operator in the sidecar, so a client can pick among them but not invent one. ([reference](docs/reference.md#asr), [sidecar protocol](docs/sidecar-protocol.md))
