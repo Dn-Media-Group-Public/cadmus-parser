@@ -7,4 +7,5 @@ Implementation order: `processor-handoff` (done: [implemented](../implemented-pl
 
 The `oauth2-upstream-auth` plan is done: [implemented](../implemented-plans/oauth2-upstream-auth.md).
 
+- [figure-extraction](figure-extraction.md) — detect pictures on scanned pages (profiles: yolo-onnx, docling-serve layout or full-page, openai-vlm) and extract them as image members; full-page profiles also give reading-order markdown with tables
 - [media-markdown](media-markdown.md) — combined time-interleaved `parsed/<path>.md` for images, video and audio from ASR, captions and frame OCR
