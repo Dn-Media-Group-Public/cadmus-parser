@@ -8,17 +8,33 @@ video go in; text, outlines and structured data come out, as artefacts in your o
 - **Everything to Markdown** with [markitdown](https://github.com/microsoft/markitdown): Word, Excel, PowerPoint, PDF, EPUB, CSV, JSON, XML, plain text ...
 - **Web pages**: HTML to Markdown with main-content extraction ([trafilatura](https://trafilatura.readthedocs.io/)), links made absolute from a base URL, plus a simplified main-content view
 - **Terse outline view** of every parsed document (headings, links, images) for cheap skimming
-- **OCR**: images and scanned PDF pages, Tesseract first, a remote multimodal model as the fallback for poor results (through a sidecar, so the parser never holds the endpoint's key); also the frames of a video (`frame-ocr`)
-- **Archives** (zip, tar, tgz, 7z, rar, gz/bz2/xz) are unpacked and every member parsed, with the usual bomb and zip-slip limits
+- **OCR**: images and scanned PDF pages, Tesseract first, a remote multimodal model as the fallback for poor results; also the frames of a video (`frame-ocr`)
+- **Speech to text (ASR)**: the audio of audio and video files, transcribed in chunks and merged into one transcript, primary model with a fallback profile ([ASR](docs/reference.md#asr))
+- **Captioning**: a description of each image and of windows of keyframes from a video, by a remote vision model with a fallback profile ([caption](docs/reference.md#caption))
+- **Archives** (zip, tar, tgz, 7z, rar, gz/bz2/xz) are unpacked and every member parsed
 - **Binary structured formats** (msgpack, CBOR, BSON, plist, protobuf, gRPC-web) become JSON
 - **Media decode**: image, video and audio decoded once into a thumbnail, scene-change keyframes, a 16 kHz `audio.opus`, a browser-playable rendition (when the original does not play) and a downscaled frame store for later per-frame analysis ([options](docs/processors.md#media-decode))
 - **File metadata** as YAML: EXIF/GPS, Office tracked changes and comments, GeoTIFF/GDAL and vector (GPX, KML, GeoJSON, GeoPackage, shapefile) CRS and bounds, audio/video streams and chapters, PDF edit history
 - **Example output trees** for every input kind: [output examples](docs/output-examples.md)
+- **File type detection** from content (libmagic), refined by file name only where the bytes are generic
 - **Your own formats**: add a processor package; processors are ordered, run per file and can recurse into archives ([how](docs/processors.md))
 
-Other client-facing capabilities: per-media-class limits (deadline, memory, file and tree sizes) set by the operator only; a per-input `index.json` that says what came out of
-each file and archive member; job-scoped, renewable store credentials (S3 and GCS) so a long video does not outlive its access; any fsspec store; horizontally scalable
-(each replica has its own uid pool); one instance per consuming stack.
+Also: a per-input `index.json` that says what came out of each file and archive member; any fsspec store; horizontally scalable (each replica has its own uid pool); one instance per
+consuming stack.
+
+## Remote models
+
+OCR fallback, ASR and captioning call remote models, always through a sidecar.
+
+A **profile** is a named, operator-configured way of reaching one model: the endpoint, the model, how to authenticate, and a prompt, all kept in the sidecar. A job asks for a
+profile by name and never sees or sets the details. Examples: `lan` (a self-hosted OCR server on the local network), a Whisper-style `transcriptions` endpoint for ASR, a
+`chat` model with audio input as the ASR fallback, or a hosted vision model for captions.
+
+- **You choose the profile per job.** `features` in the job (`{"asr": "<profile>", "asr-fallback": "<profile>", "caption": "<profile>", "ocr": "<profile>"}`) names which
+  model profile each feature uses, and a fallback can be a different one; the parser gets only the profile its job asked for. Profiles (endpoint, model, auth, prompt) are
+  defined by the operator in the sidecar, so a client can pick among them but not invent one. ([reference](docs/reference.md#asr), [sidecar protocol](docs/sidecar-protocol.md))
+- **Usage is logged by the sidecar, not the parser.** One record per upstream call (feature, profile, model, outcome, tokens or audio seconds) ends up in the job's
+  `status.json`, so cost data can be trusted even if the parser is not. ([status.json](docs/reference.md#statusjson-and-indexjson), [client guide](docs/client.md))
 
 ---
 
@@ -30,6 +46,13 @@ Anything that interprets a file you did not write (documents, images, archives, 
 runs that code as a process that **holds no credential and has no route out**: a small trusted wrapper moves the bytes between your object store and a
 sandboxed parser on a pool uid, behind an authenticated egress proxy, with an optional sidecar for remote services (OCR, say) the parser may use without ever
 holding their keys.
+
+Defences beyond the sandbox itself:
+
+- **Remote services** (OCR, ASR, captioning) are reached only through sidecars, so the parser never holds the endpoint's key.
+- **Archives** are unpacked with bomb and zip-slip limits.
+- **Per-media-class limits** (deadline, memory, file and tree sizes) are set by the operator only, never by the client or the file.
+- **Store credentials** are job-scoped and renewable (S3 and GCS), so a long video does not outlive its access and a job can touch only its own data.
 
 Each consuming stack runs **its own instance** of these services (own store, own tokens). What is shared is code and images, not a running service.
 Only Docker Swarm stacks are supported (`docker stack deploy`).
