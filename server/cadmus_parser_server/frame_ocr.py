@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 from difflib import SequenceMatcher
+from functools import partial
 
 from cadmus_parser_server import ocr
 from cadmus_parser_server.asr import HANDLERS
@@ -75,8 +76,8 @@ def read_frames(path: str, width: int, height: int, fps: float):
         p.wait()
 
 
-def _engine(img):
-    text, conf, engine, _ = ocr.ocr_engine(img)
+def _engine(img, langs=None):
+    text, conf, engine, _ = ocr.ocr_engine(img, langs)
     return text, conf, engine
 
 
@@ -108,7 +109,7 @@ class FrameOcr:
         if not p or p["fps"] <= 0 or not p["width"]:
             sink.note(f"frame-ocr: {file.rel}: no usable frame pass" + (f" {o['pass']!r}" if o["pass"] else ""))
             return
-        entries, capped = ocr_frames(read_frames(os.path.join(dec, p["file"]), p["width"], p["height"], p["fps"]), _engine, 1 / p["fps"],
+        entries, capped = ocr_frames(read_frames(os.path.join(dec, p["file"]), p["width"], p["height"], p["fps"]), partial(_engine, langs=ocr.resolve_langs(ctx.options_of("ocr").get("langs"), sink.note)), 1 / p["fps"],
                                      float(o["change_threshold"]), int(o["max_frames"]))
         if capped:
             sink.note(f"frame-ocr: {file.rel}: stopped after {o['max_frames']} OCR runs at {entries[-1]['t_end'] if entries else 0:.0f}s")

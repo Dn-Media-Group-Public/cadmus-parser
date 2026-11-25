@@ -25,6 +25,20 @@ ENTRYPOINT ["tini", "--", "/cadmus/server/entrypoint.sh"]
 - Scratch keeps every intermediate until the job ends: size `PARSE_SCRATCH` for the input plus the kept intermediates of the largest job (the per-job limits still bound it).
   See also: [Plan: processor handoff](implemented-plans/01-processor-handoff.md)
 - `/scratch` is an anonymous volume: the scratch area is ephemeral, so a restart deletes what a crash left.
+- The `layout-sidecar` image takes the model weights as build arguments (`MODEL_URL`, `MODEL_SHA256`, `MODEL_NAME`, `MODEL_LICENSE`): fetched in a build stage, checked, recorded in a label and `/models/README`; `model_path` in a profile names the file. A different model is a different image tag.
 - Sidecars are used as built by the library: `docker build -f blob-sidecar/Dockerfile .`, `docker build -f ocr-sidecar/Dockerfile .`, `docker build -f asr-sidecar/Dockerfile .` (the library root is the context). `server/Dockerfile`
   builds a ready-made image with the default processors and their tools (the quickstart uses it).
 - Point the stack at your image with the overlay: `python -m cadmus_parser_server.overlay --client web --parser-image myorg/my-parser:1`.
+
+## OCR languages
+
+- **Available** is a deploy-time fact. Tesseract: `OCR_LANGS` names the packs installed in the image (native names, default `nor+eng`; install the `tesseract-ocr-<pack>` packages). `docling-serve`: the OCR engine
+  and models of that deployment. VLM profiles: nothing to install.
+- **Selected per job**: `options["ocr"] = {"langs": ["nb", "en"]}`, IETF BCP 47 tags (`nb`, `zh-Hans`, `de-Latf`), shared by `page-ocr`, `frame-ocr` and the image path. The deployment may set
+  `OCR_DEFAULT_LANGS` (BCP 47, a subset of the available languages). **The job overrides the deployment default**; there are no further levels. A language that is not available, or has no pack mapping,
+  is dropped with a note; if none is left the job behaves as if unset.
+- **Default when neither sets one:** whatever the engine can detect. Tesseract cannot, so all installed packs together (slower and less exact: selecting is better); VLM profiles and Docling get no hint.
+- **How it reaches each engine:** Tesseract gets its `lang` per call through a built-in table from BCP 47 to pack names (`en`→`eng`, `nb`/`nn`/`no`→`nor`, `zh-Hans`→`chi_sim`, `de-Latf`→`Fraktur`, ...). `ocr-sidecar` and
+  `layout-sidecar` get `X-Language: nb,en` (BCP 47; a VLM prompt hint; `docling-serve` gets its OCR language option through the profile's `lang_map`, BCP 47 tag to the engine's own code, e.g. EasyOCR `no`/`en`;
+  `yolo-onnx` ignores it).
+See also: [Plan: Figure extraction](implemented-plans/figure-extraction.md)

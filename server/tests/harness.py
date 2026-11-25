@@ -16,7 +16,7 @@ from cadmus_parser_server import wrapper
 
 TOKEN = "test-wrapper-token"
 PROFILES = {"ocr": {"remote": {"url": "http://ocr-remote", "token": "tok-remote"}, "lan": {"url": "http://ocr-lan", "token": "tok-lan"}}}
-TOP = {"original", "parsed", "simplified", "terse", "metadata"}
+TOP = {"original", "parsed", "simplified", "terse", "metadata", "figures"}
 # the real worker minus the metadata extractors (they need exiftool and ffprobe, which dev machines lack)
 NO_METADATA = [sys.executable, "-I", "-u", "-c", "import sys\nfrom cadmus_parser_server import metadata, worker\n"
                "metadata.extract_metadata = lambda *a, **k: {}\nworker.main(sys.argv[1])"]

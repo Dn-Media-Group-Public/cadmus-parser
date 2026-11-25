@@ -62,7 +62,8 @@ def make_app(profiles: dict, max_body: int = 10 << 20, max_concurrent: int = 4, 
         if busy.locked():
             return JSONResponse({"error": "busy"}, 503)
         async with busy:
-            msg = {"role": "user", "content": [{"type": "text", "text": p.get("prompt") or PROMPT},
+            langs = ", ".join(x.strip() for x in request.headers.get("x-language", "").split(",") if x.strip())  # BCP 47 tags, a hint for the model
+            msg = {"role": "user", "content": [{"type": "text", "text": (p.get("prompt") or PROMPT) + (f" The text is in: {langs}." if langs else "")},
                                                {"type": "image_url", "image_url": {"url": f"data:{ctype};base64,{base64.b64encode(body).decode()}"}}]}
             call = {"feature": "ocr", "profile": next(n for n, v in profiles.items() if v is p), "model": p["model"], "unit": "tokens"}
             try:

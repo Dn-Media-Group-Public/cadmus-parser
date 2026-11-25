@@ -20,7 +20,7 @@ Every request carries `Authorization: Bearer <WRAPPER_TOKEN>`. Every non-2xx ans
 - `input.options` / `output.options` are the credential for that side (an fsspec `storage_options` fragment), merged over `PARSE_BLOB_OPTIONS`, in memory only.
   The two sides may be different stores. A GCS downscoped token travels as `gcs_access_token` (a string; `cadmus_parser.wire` converts).
 - `options` is **keyed by processor name**; a processor sees only its own entry. There is no `processor` field: every installed processor that accepts a file runs.
-- `features` is `{name: profile}`; `ocr`, `asr`, `asr-fallback`, `caption` and `caption-fallback` ship (primary and fallback model of [ASR](#asr) and [caption](#caption)). Unknown name or profile: 400.
+- `features` is `{name: profile}`; `ocr`, `asr`, `asr-fallback`, `caption`, `caption-fallback` and `layout` ship (primary and fallback model of [ASR](#asr) and [caption](#caption); [figure extraction](#figure-extraction)). `layout` alone takes **an ordered list of profiles** (a string is a chain of one; `[]` = the operator's `LAYOUT_DEFAULT_CHAIN`). Unknown name or profile, or a `layout` profile outside `LAYOUT_ALLOWED`: 400.
 - No class or limit fields: the wrapper picks the media class itself and only the operator sets numbers.
 
 Answers: `202 {"status": "running", "id": "<opaque job id>", "owner": "<ip:port>"}`; `400` bad body, unknown feature or profile, credential rejected or output base
@@ -98,9 +98,9 @@ Group `cadmus_parser.processors`; see [How to write a processor](processors.md).
   `host:port` exceptions, for a store inside your stack); networks `parse-egress` and `public`.
 - the `public` network (the way out of the proxy); the same definition may be in your own stack file.
 
-The overlay (`python -m cadmus_parser_server.overlay --client web --client worker [--dev-store host:port] [--ocr] [--asr] [--caption] [--parser-image my/parser:1]`) adds a
+The overlay (`python -m cadmus_parser_server.overlay --client web --client worker [--dev-store host:port] [--ocr] [--asr] [--caption] [--layout] [--parser-image my/parser:1]`) adds a
 network `<client>-parse` per client service that only that client and the parser are on, `PARSE_URL=http://parser:8080` and
-`PARSE_TOKEN=${WRAPPER_TOKEN}` in each client, your image for `parser`, the dev store's network for the proxy and the `ocr-sidecar` / `asr-sidecar` / `caption-sidecar` with `--ocr` / `--asr` / `--caption`.
+`PARSE_TOKEN=${WRAPPER_TOKEN}` in each client, your image for `parser`, the dev store's network for the proxy and the `ocr-sidecar` / `asr-sidecar` / `caption-sidecar` / `layout-sidecar` with `--ocr` / `--asr` / `--caption` / `--layout`.
 
 ## Environment variables
 
@@ -121,6 +121,11 @@ network `<client>-parse` per client service that only that client and the parser
 | `CAPTION_PROFILES`, `CAPTION_ADMIN_TOKEN`, `CAPTION_MAX_BODY`, `CAPTION_MAX_CONCURRENT`, `CAPTION_TIMEOUT` | caption-sidecar | its own profile table (see Caption below), usage reporting, caps |
 | `CAPTION_TIMEOUT`, `CAPTION_BUSY_WAIT` | parser (forwarded) | seconds per sidecar call (default 120); seconds to wait, times the try number, on a 503 (default 3, up to 5 tries) |
 | `ASR_TIMEOUT`, `ASR_BUSY_WAIT` | parser (forwarded) | seconds per sidecar call (default 600); seconds to wait, times the try number, when the sidecar answers 503 (default 3, up to 5 tries) |
+| `LAYOUT_PROFILES` | parser (stack file: `PARSE_LAYOUT_TABLE`) | like `OCR_PROFILES`, for `features.layout`; the parser gets `LAYOUT_CHAIN` = the profiles the job named, in order (`[{name, url, token}]`) |
+| `LAYOUT_DEFAULT_CHAIN`, `LAYOUT_ALLOWED` | parser | profile names: the chain used when a job asks for `layout` without naming profiles; the profiles a job may name (unset = all, a one-name list forces that profile) |
+| `LAYOUT_PROFILES`, `LAYOUT_ADMIN_TOKEN`, `LAYOUT_MAX_BODY`, `LAYOUT_MAX_CONCURRENT`, `LAYOUT_TIMEOUT` | layout-sidecar | its own profile table (see Figure extraction below), usage reporting, caps |
+| `LAYOUT_TIMEOUT`, `LAYOUT_BUSY_WAIT` | parser (forwarded) | seconds per sidecar call (default 120); seconds to wait, times the try number, on a 503 (default 3, up to 5 tries) |
+| `OCR_LANGS`, `OCR_DEFAULT_LANGS` | parser (forwarded) | installed Tesseract packs; the default languages (BCP 47) a job gets when it selects none: see [OCR languages](parser-image.md#ocr-languages) |
 | `PARSE_POOL_SIZE` | parser | parsers per replica (default 4); a full replica answers 503 |
 | `PARSE_UID_BASE` | parser | first pool uid (default 20000) |
 | `PARSE_SCRATCH` | parser | scratch area (default `/scratch`; an anonymous volume) |
@@ -241,4 +246,28 @@ See also: [Plan: Caption](implemented-plans/05-caption.md)
 ## media-markdown
 
 For an image, video or audio file decoded by `media-decode`, `media-markdown` writes `parsed/<rel>.md` (no `terse/`: it would hold nothing useful) from whichever of `asr`, `caption` and `frame-ocr` produced a result: one paragraph per item, in time order, no headings. A speech segment is `` `0:06` **B**: text `` (no name when the ASR gave none), a caption `` `0:08` _SCENE_: text ``, a frame-OCR entry `` `0:05` _ON SCREEN_: text `` (multi-line OCR text joined with ` / `). An image has no times: its caption, then its OCR text. Captions that were skipped or blocked leave no line. Nothing is written when no part exists; the file is still claimed, so `documents` never sees media. The three JSON outputs are unchanged.
-See also: [Plan: media-markdown](implemented-plans/media-markdown.md)
+An image's OCR runs here as page 1 (`page_ocr.image_markdown`): with `layout`, its figures become members `page-0001/fig-N.png` and `figures/<rel>/figures.json` is written.
+See also: [Plan: media-markdown](implemented-plans/media-markdown.md), [Plan: Figure extraction](implemented-plans/figure-extraction.md)
+
+## Figure extraction
+
+`features: {"layout": ["cheap", "docling"]}` (a chain; the first profile whose answer is *reliable* stands, the last one's stands whatever it is) finds the pictures on **scanned pages**
+(a scanned PDF page, or an image file as page 1) and keeps each as an image member that goes through the normal image chain (thumbnail, metadata, `caption`, OCR). Layout runs on a page only
+when Tesseract found at least `min_text_chars` (200) characters on it: a photo without text is the caption's job, and the embedded images of a page with a text layer are left alone. With no
+`layout` feature (or no profile configured) nothing changes. A page goes to the next profile when a profile returned no region at all, or its confidence is below the profile's `escalate_below`
+(the page-level `score` of the engine, else the mean of its boxes; defaults `yolo-onnx` 0.5, `docling-serve` 0.5, `openai-vlm` none), or on any error or 502; a 503 is waited out. The operator
+decides which profiles exist, the default chain and the allowed set (`LAYOUT_*` above); the job picks its chain among them (`["docling"]` = Docling required, no silent fallback).
+
+Options, `options["page-ocr"]`: `min_text_chars` (200), `max_side` (2000, the page is downscaled for detection; crops are cut from the full-resolution page), `score_min` (0.3), `min_side` (64 px),
+`min_area_frac` (0.01 of the page), `max_figures` (30 per page), `max_figure_members` (per file; tightens the answering profile's own cap: `yolo-onnx` 2000, `docling-serve` 1000, `openai-vlm` 200),
+`workers` (4). Languages, `options["ocr"]["langs"]`: [OCR languages](parser-image.md#ocr-languages).
+
+Output: the crops are members of the real file, `doc.pdf.d/page-0003/fig-1.png` (`page-0001/…` for an image), in page order; no page image is ever an output; `members` keeps each crop as
+`original/<rel>`. `figures/<file.rel>/figures.json` (when anything was found): `[{"page", "label": "picture|table", "member" (null when not extracted), "bbox" [x0, y0, x1, y1] in pixels of the
+full-resolution page, "page_size", "score", "profile", "engine"}]`. Notes name the profile that answered and any escalation (`d.pdf: page 3: layout docling (escalated from cheap)`). A failure never fails
+the parse: the page keeps its OCR text and a note says why. Past the cap the remaining figures are not extracted and a note says so. A `docling-serve` profile with `mode: full` also gives the page text
+(reading order, headings, tables as Markdown, `![](page-0003/fig-1.png)` links) which **replaces** that page's Tesseract/`ocr` text, and tables as `page-0003/table-1.md` members; other profiles never change the page text.
+
+The `layout-sidecar` profile table (`LAYOUT_PROFILES`): `{name: {token, engine: yolo-onnx|docling-serve|openai-vlm, escalate_below?, max_figure_members?, ...}}` with `yolo-onnx`: `model_path` (a file in the image: weights are baked in at build time), `score_min?`, `input_size?`,
+`classes?`, `label_map?`; `docling-serve`: `base_url` (directly, or a LiteLLM pass-through route), `auth`, `mode: layout|full`, `lang_map?`; `openai-vlm`: `base_url`, `model`, `auth`, `prompt?`, `format: json|doctags`.
+See also: [Plan: Figure extraction](implemented-plans/figure-extraction.md)

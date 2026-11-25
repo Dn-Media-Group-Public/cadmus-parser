@@ -141,3 +141,13 @@ See also: [Plan: file type detection](../implemented-plans/07-filetype-detection
 
 `media-markdown` (after `media-decode`, `asr-split`, `caption-split` and `frame-ocr`; `before` the content handlers) claims every file media-decode decoded as image, video or audio and writes `parsed/<rel>.md` (see [reference](reference.md#media-markdown)). `asr-split`, `caption-split` and `frame-ocr` also leave a scratch copy of their JSON result in their own `ctx.dir()`, which it reads; a feature that did not run or failed leaves none and its part is omitted. Image OCR (`ocr.maybe_ocr`) runs here instead of in `documents`.
 See also: [Plan: media-markdown](implemented-plans/media-markdown.md)
+
+## page-ocr
+
+Scanned PDF pages (and an image, as page 1) are **page units**, the idiom of `asr-split` and `caption-split`: the parent (`documents` for a PDF, `media-markdown` for an image) renders each scanned page
+(`OCR_DPI`; a page whose text layer has at least `OCR_MIN_CHARS` characters keeps its pdfium text) to a scratch PNG, writes a unit manifest `page-NNNN.json` and runs the chain on it as a synthetic member.
+`page-ocr` (before the content handlers) accepts only those, claims them and runs `ocr.ocr_page`: Tesseract (also the gate), the layout chain (`layout.py`: escalation), the text (a `full` profile's Markdown
+or Tesseract's / the remote OCR's) and the crops (`member-NNNN.png`, `member-tNNNN.md`), leaving `page.json` and the crops in its `ctx.dir()`; it creates no member and no output. The parent assembles
+`parsed/<rel>.md` in page order and then recurses each crop as `ctx.recurse(path, "page-0003/fig-1.png")` in page order (so the entries in `index.json` are in page order, no worker change, no page entry),
+counting `max_figure_members` as it goes, and writes `figures/<rel>/figures.json`. A figure member (`page-NNNN/fig-N.png`) never goes through layout again. See [reference](reference.md#figure-extraction).
+See also: [Plan: Figure extraction](implemented-plans/figure-extraction.md)

@@ -60,3 +60,28 @@ A sidecar that reaches an upstream should pin its own egress (iptables rules app
 `common/egress_rules.py` (`pinned_rules` for a fixed set of endpoints (the model hosts and, for `oauth2` profiles, the token host), `public_rules` for a proxy). Put it on an internal network shared only with the parser.
 
 There is a written spec only: no conformance suite and no skeleton service. The library's own sidecars have unit tests (`ocr-sidecar/tests`, `asr-sidecar/tests`, `caption-sidecar/tests`).
+
+## The layout sidecar
+
+`layout-sidecar` follows this protocol: `POST /process` with a PNG/JPEG page, the token selects the profile (`yolo-onnx` in the sidecar on CPU, `docling-serve`, or `openai-vlm`), optional `X-Language: nb,en` (BCP 47).
+**Common response** for every engine: `{"engine", "model", "width", "height", "boxes": [{"label": "picture|table|text|title|other", "bbox": [x0, y0, x1, y1], "score"}], "score"?, "escalate_below", "max_figure_members"}`;
+`bbox` is in pixels of the image that was sent; `score` is the engine's page-level confidence when it has one; `escalate_below` and `max_figure_members` are the profile's effective values (its own or the engine's
+default) so that the parser needs no copy of the table. A `mode: full` profile adds `markdown` to each box (none for pictures), in reading order, and `"full": true`. Unparseable upstream output is a 502,
+never an empty list. Usage is recorded per page (`unit: pages`) or per token for a VLM.
+
+**Docling behind LiteLLM.** LiteLLM's generic pass-through proxies `docling-serve` unchanged, multipart included (`include_subpath` is needed for `/v1/convert/file`):
+
+```yaml
+general_settings:
+  master_key: sk-...
+  pass_through_endpoints:
+    - path: "/docling"
+      target: "http://docling:5001"
+      include_subpath: true
+      auth: true
+```
+
+`base_url: http://litellm:4000/docling` with `auth: bearer` and the LiteLLM key as `api_key`. `auth: true` is enforced: no key gives 401; a key other than the master key is looked up in LiteLLM's
+database (no database: 400 `No connected db`), so virtual keys need the usual LiteLLM database (not tested). Not verified against a real deployment: image uploads, the OCR language option behind `lang_map`,
+table cell text on a scanned page.
+See also: [Plan: Figure extraction](implemented-plans/figure-extraction.md)

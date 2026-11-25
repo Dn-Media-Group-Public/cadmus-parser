@@ -39,6 +39,7 @@ caption-primary = "cadmus_parser_server.caption:CaptionPrimary"
 caption-fallback = "cadmus_parser_server.caption:CaptionFallback"
 caption-skip = "cadmus_parser_server.caption:CaptionSkip"
 media-markdown = "cadmus_parser_server.media_markdown:MediaMarkdown"
+page-ocr = "cadmus_parser_server.page_ocr:PageOcr"
 
 [tool.setuptools.packages.find]
 include = ["cadmus_parser_server*"]

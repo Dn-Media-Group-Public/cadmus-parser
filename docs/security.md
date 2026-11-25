@@ -53,7 +53,8 @@ Resource abuse is bounded by the operator's limits only (`PARSE_LIMITS`): every 
 ## Sidecars
 
 A token selects a profile, and a profile is only what the job was given: a job can use no other profile. Sidecars hold the real endpoint credentials and have no
-store access; they pin their own egress. Keep tokens unique and different from `WRAPPER_TOKEN` and `PROXY_TOKEN`.
+store access; they pin their own egress. Keep tokens unique and different from `WRAPPER_TOKEN` and `PROXY_TOKEN`. The `layout-sidecar` is one more of these (own internal network `parse-layout`, own pinned egress; a `yolo-onnx` profile
+calls nobody, its weights are baked into the image at build time from a pinned URL and checksum and nothing is downloaded at runtime); a job holds only the tokens of the layout profiles in its chain. See also: [Plan: Figure extraction](implemented-plans/figure-extraction.md)
 
 ## libmagic
 

@@ -8,7 +8,7 @@ with `ctx.recurse` (they are parsed, never unpacked again)."""
 import os
 import shutil
 
-from cadmus_parser_server import extract, metadata, ocr
+from cadmus_parser_server import extract, metadata, ocr, page_ocr
 from cadmus_parser_server.filetype import detect
 
 
@@ -186,7 +186,7 @@ class Html:
 
 class Documents:
     """Everything else (office, PDF, images, text ...): markitdown, with OCR for images and scanned PDF pages; the fallback, after every other handler."""
-    name, top_dirs, after = "documents", ("parsed", "terse"), ("sizecap", "archives", "markdown", "binary", "apk", "html")
+    name, top_dirs, after = "documents", ("parsed", "terse", "figures"), ("sizecap", "archives", "markdown", "binary", "apk", "html")
 
     def accepts(self, file) -> bool:
         return _small(file)
@@ -199,7 +199,15 @@ class Documents:
                 text = extract.file_to_markdown(raw, path)
             except Exception as e:  # noqa: BLE001
                 sink.note(f"{path} not parsed ({type(e).__name__}: {e})")
-        text = ocr.maybe_ocr(raw, path, ctype, text, sink.note)
+        if ctype in ocr.IMAGE_TYPES:
+            text = page_ocr.plain_image_text(raw, path, ctx, sink)
+        elif ctype == "application/pdf" or path.lower().endswith(".pdf"):
+            try:
+                text = page_ocr.pdf_markdown(raw, path, text, sink, ctx, file)
+            except ImportError as e:
+                sink.note(f"{path}: ocr unavailable ({e})")
+            except Exception as e:  # noqa: BLE001  OCR never fails the parse
+                sink.note(f"{path}: ocr failed ({type(e).__name__}: {e})")
         if not text.strip():
             if b"\0" not in raw[:1024]:  # ponytail: NUL sniff; text nobody converted is still returned inline from the input
                 sink.info(meta={"text": True})

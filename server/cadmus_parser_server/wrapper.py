@@ -42,14 +42,14 @@ from cadmus_parser_server import limits as lm
 
 log = logging.getLogger("wrapper")
 API_VERSION = "1"
-FEATURES = {"ocr": "OCR", "asr": "ASR", "asr-fallback": "ASR_FALLBACK", "caption": "CAPTION", "caption-fallback": "CAPTION_FALLBACK"}  # feature -> environment prefix: <PREFIX>_PROFILES (name -> {url, token}) here, <PREFIX>_URL/<PREFIX>_TOKEN in the parser
+FEATURES = {"ocr": "OCR", "asr": "ASR", "asr-fallback": "ASR_FALLBACK", "caption": "CAPTION", "caption-fallback": "CAPTION_FALLBACK", "layout": "LAYOUT"}  # feature -> environment prefix: <PREFIX>_PROFILES (name -> {url, token}) here, <PREFIX>_URL/<PREFIX>_TOKEN in the parser
 LINE_MAX = 4096  # PIPE_BUF: the parser writes each record with one write
 HEARTBEAT, STALE = 10, 30  # seconds
 MAX_DEPTH = 8  # archive levels in index.json
 MAX_META = 2000  # bytes of one entry's `meta`, as JSON
 # the operator settings the parser process enforces (no secret): the only part of the wrapper's own environment a parser gets; PARSE_PASS_ENV adds names
 PARSER_ENV = ("MAX_PARSE_BYTES", "MAX_PARSE_BYTES_FILES", "MAX_PARSE_BYTES_IMAGE", "MAX_PARSE_BYTES_VIDEO", "MAX_PARSE_BYTES_SOUND", "MAX_ARCHIVE_BYTES", "MAX_ARCHIVE_MEMBERS", "PARSE_MEMBER_WORKERS", "MAX_SYNTHETIC_MEMBERS", "METADATA_TIMEOUT", "METADATA_MAX_MEM", "METADATA_MAX_BYTES", "OCR_TIMEOUT",
-              "OCR_LANGS", "OCR_MIN_CONF", "OCR_MIN_CHARS", "OCR_DPI", "OCR_MAX_PAGES", "OCR_MAX_SIDE", "OCR_TESSERACT_TIMEOUT", "ASR_TIMEOUT", "ASR_BUSY_WAIT", "CAPTION_TIMEOUT", "CAPTION_BUSY_WAIT")
+              "OCR_LANGS", "OCR_DEFAULT_LANGS", "LAYOUT_TIMEOUT", "LAYOUT_BUSY_WAIT", "OCR_MIN_CONF", "OCR_MIN_CHARS", "OCR_DPI", "OCR_MAX_PAGES", "OCR_MAX_SIDE", "OCR_TESSERACT_TIMEOUT", "ASR_TIMEOUT", "ASR_BUSY_WAIT", "CAPTION_TIMEOUT", "CAPTION_BUSY_WAIT")
 
 
 def sidecar_call(p: dict, method: str, path: str, body: dict | None = None) -> dict:
@@ -85,7 +85,7 @@ class Config:
     def __init__(self, token: str, blob_options: dict | None = None, profiles: dict | None = None, scratch: str = "/scratch", uid_base: int = 20000,
                  pool_size: int = 4, replica: str = "wrapper", limits: dict | None = None, max_records: int = 500_000, max_notes: int = 1000,
                  max_entries: int = 50_000, parser_cmd: list | None = None, heartbeat: float = HEARTBEAT, top_dirs=None, tracebacks: bool = False,
-                 pass_env: tuple = PARSER_ENV, max_usage_calls: int = 20000):
+                 pass_env: tuple = PARSER_ENV, max_usage_calls: int = 20000, layout_default: list | None = None, layout_allowed: list | None = None):
         """`profiles`: {feature: {profile: {url, token}}}. `limits_`: PARSE_LIMITS (lm.resolve). `top_dirs`: default = what the processors declare."""
         self.token, self.blob_options, self.profiles = token, blob_options or {}, profiles or {}
         self.scratch, self.uid_base, self.pool_size, self.replica = scratch, uid_base, pool_size, replica
@@ -94,6 +94,7 @@ class Config:
         self.parser_cmd = parser_cmd or [sys.executable, "-I", "-u", "-m", "cadmus_parser_server.worker"]
         self.heartbeat, self.tracebacks, self.pass_env = heartbeat, tracebacks, pass_env
         self.max_usage_calls = max_usage_calls
+        self.layout_default, self.layout_allowed = layout_default or [], layout_allowed  # LAYOUT_DEFAULT_CHAIN / LAYOUT_ALLOWED (None = every profile)
         self.top_dirs = set(top_dirs) if top_dirs is not None else None
 
     @classmethod
@@ -104,7 +105,8 @@ class Config:
                    env_int("PARSE_UID_BASE", 20000), env_int("PARSE_POOL_SIZE", 4), e.get("REPLICA_ID") or e.get("HOSTNAME") or "wrapper",
                    json.loads(e.get("PARSE_LIMITS") or "{}"), max_entries=env_int("MAX_ARCHIVE_MEMBERS", 50_000),
                    tracebacks=e.get("PARSE_TRACEBACKS") == "1", pass_env=(*PARSER_ENV, *e.get("PARSE_PASS_ENV", "").split()),
-                   max_usage_calls=env_int("PARSE_USAGE_MAX_CALLS", 20000))
+                   max_usage_calls=env_int("PARSE_USAGE_MAX_CALLS", 20000), layout_default=e.get("LAYOUT_DEFAULT_CHAIN", "").replace(",", " ").split(),
+                   layout_allowed=e["LAYOUT_ALLOWED"].replace(",", " ").split() if e.get("LAYOUT_ALLOWED") else None)
 
 
 # ---- the uid pool ---------------------------------------------------------------------------------------------
@@ -327,27 +329,32 @@ class Job:
             self.write_json("status.json", {**s, "usage": usage} if usage else s)  # usage is not remembered: it can be big
 
     # -- usage reporting: the parser gets a job token, the sidecar records against it, the wrapper reads the record --
+    def uses(self) -> list:
+        """[(usage key, feature, profile)] of what the job asked for: `layout` names a chain, one entry (and one usage record) per profile in it."""
+        return [(f"{f}.{p}" if f == "layout" else f, f, p) for f, v in (self.req.get("features") or {}).items() for p in ([v] if isinstance(v, str) else v)]
+
     def register(self, lim: dict) -> None:  # one sidecar record per feature (id `<job>.<feature>`): two features on one sidecar must not share a record
         ttl = (lim["deadline_s"] or 3600) + 300
-        for feature, profile in (self.req.get("features") or {}).items():
+        for key, feature, profile in self.uses():
             p = self.w.cfg.profiles[feature][profile]
             if p.get("admin_token"):
                 try:
-                    self.tokens[feature] = sidecar_call(p, "POST", "/admin/jobs", {"job": f"{self.id}.{feature}", "profile": profile, "ttl": ttl})["token"]
+                    self.tokens[key] = sidecar_call(p, "POST", "/admin/jobs", {"job": f"{self.id}.{key}", "profile": profile, "ttl": ttl})["token"]
                 except Exception as e:  # noqa: BLE001  no usage for this feature; the parser keeps the profile token and the job runs
-                    log.warning("could not register job %s with %s: %s", self.key, feature, e)
-                    self.reg_errors.append(f"{feature}: {type(e).__name__}")
+                    log.warning("could not register job %s with %s: %s", self.key, key, e)
+                    self.reg_errors.append(f"{key}: {type(e).__name__}")
 
     def collect(self) -> dict | None:
         calls, truncated, errors, cap = [], False, list(self.reg_errors), self.w.cfg.max_usage_calls
-        for feature in self.tokens:
-            p = self.w.cfg.profiles[feature][self.req["features"][feature]]
+        for key, feature, profile in self.uses():
+            if key not in self.tokens:
+                continue
             try:
-                r = sidecar_call(p, "GET", f"/admin/jobs/{self.id}.{feature}/usage")
+                r = sidecar_call(self.w.cfg.profiles[feature][profile], "GET", f"/admin/jobs/{self.id}.{key}/usage")
                 calls += r["calls"]
                 truncated |= bool(r.get("truncated"))
             except Exception as e:  # noqa: BLE001
-                errors.append(f"{feature}: {type(e).__name__}")
+                errors.append(f"{key}: {type(e).__name__}")
         if not self.tokens and not errors:
             return None
         calls.sort(key=lambda c: c.get("t", 0))
@@ -395,9 +402,15 @@ class Job:
         env = {"PYTHONUNBUFFERED": "1", "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"), "HOME": work, "TMPDIR": work,
                "LANG": "C.UTF-8", "OPENBLAS_NUM_THREADS": "1", "OMP_NUM_THREADS": "1"}
         env |= {k: os.environ[k] for k in cfg.pass_env if os.environ.get(k)}
-        for feature, profile in (self.req.get("features") or {}).items():  # only the requested profile: a job never holds another's token
+        chain = []
+        for key, feature, profile in self.uses():  # only the requested profiles: a job never holds another's token
             p, prefix = cfg.profiles[feature][profile], FEATURES[feature]
-            env |= {f"{prefix}_URL": p["url"], f"{prefix}_TOKEN": self.tokens.get(feature, p["token"])}
+            if feature == "layout":
+                chain.append({"name": profile, "url": p["url"], "token": self.tokens.get(key, p["token"])})
+            else:
+                env |= {f"{prefix}_URL": p["url"], f"{prefix}_TOKEN": self.tokens.get(key, p["token"])}
+        if chain:
+            env["LAYOUT_CHAIN"] = json.dumps(chain)
         return env
 
     def launch(self, jobdir: str, uid: int, lim: dict) -> subprocess.Popen:
@@ -667,14 +680,22 @@ def make_app(cfg: Config) -> Starlette:
             body = await request.json()
             side_of(body, "input"), side_of(body, "output")
             features, options = body.get("features") or {}, body.get("options") or {}
-            assert isinstance(features, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in features.items())
+            assert isinstance(features, dict) and all(isinstance(k, str) and (isinstance(v, str) or k == "layout" and isinstance(v, list) and all(isinstance(x, str) for x in v))
+                                                     for k, v in features.items())
             assert isinstance(options, dict) and all(isinstance(v, dict) for v in options.values())
         except Exception as e:  # noqa: BLE001
             return error(400, f"bad request body ({type(e).__name__}: {str(e)[:100]})" if isinstance(e, ValueError) else "bad request body")
         if unknown := sorted(set(features) - set(FEATURES)):
             return error(400, f"unknown feature {unknown[0]!r}")
+        if "layout" in features:  # a chain (a plain string is a chain of one); none named = the operator's default
+            chain = [features["layout"]] if isinstance(features["layout"], str) and features["layout"] else (features["layout"] or [])
+            features["layout"] = chain = list(dict.fromkeys(chain or cfg.layout_default))
+            if not chain:
+                return error(400, "layout needs profiles: none named and no LAYOUT_DEFAULT_CHAIN")
+            if any(c not in cfg.profiles["layout"] or (cfg.layout_allowed is not None and c not in cfg.layout_allowed) for c in chain):
+                return error(400, "unknown layout profile")
         for feature, profile in features.items():
-            if profile not in cfg.profiles.get(feature, {}):
+            if feature != "layout" and profile not in cfg.profiles.get(feature, {}):
                 return error(400, f"unknown {feature} profile")
         try:
             cur = await asyncio.to_thread(w.read_status, body["output"]["url"], body["output"].get("options") or {})  # a stale heartbeat reads as failed: restarted

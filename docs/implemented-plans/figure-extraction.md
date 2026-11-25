@@ -1,6 +1,6 @@
 # Plan: Figure extraction from scanned pages
 
-> **Status: draft.** Depends on [processor-handoff](../implemented-plans/01-processor-handoff.md) (synthetic members), [sidecar-usage-reporting](../implemented-plans/03-sidecar-usage-reporting.md),
+> **Status: implemented.** Depends on [processor-handoff](../implemented-plans/01-processor-handoff.md) (synthetic members), [sidecar-usage-reporting](../implemented-plans/03-sidecar-usage-reporting.md),
 > [caption](../implemented-plans/05-caption.md) and the existing OCR (`server/cadmus_parser_server/ocr.py`); shares `common/upstream_auth.py` and the profile wiring with the other sidecars.
 
 ## Problem / Goal
@@ -135,3 +135,13 @@ A throwaway stack (LiteLLM `main-stable` and `docling-serve-cpu`, both with arm6
 ## Docs to update
 
 `docs/parser-image.md` and `docs/quickstart.md` (a new "OCR languages" section for every OCR engine: available, `OCR_DEFAULT_LANGS`, selected per job, default; linked from both; the sidecar image's baked-in weights), `docs/sidecar-protocol.md` (the new sidecar, the LiteLLM pass-through example with its `include_subpath`/`auth` settings and the database note for virtual keys, the common box response, `full` profiles), `docs/processors.md` (`page-ocr`, page units, `documents` and `media-markdown` changes, crops created by the parent as members of a real file), `docs/reference.md` (feature `layout`, options `options["page-ocr"]`, `figures.json`), `docs/security.md` (a new sidecar and egress), `docs/quickstart.md` (profiles), `docs/plans/index.md`, `docs/implemented-plans/index.md`.
+
+## Implementation notes (where the code settled differently from the text above)
+
+- **Chain entries carry the profile name.** `LAYOUT_CHAIN` is `[{name, url, token}]` (the plan said `{url, token}`): the parser needs the name for `figures.json` and the escalation notes. One usage record is registered per profile of the chain (`<job>.layout.<profile>`).
+- **`escalate_below` and `max_figure_members` come with the answer.** The sidecar's response carries the profile's effective values (its own or the engine default); the parser keeps no copy of the sidecar's table.
+- **`max_figure_members` is counted by the parent**, serially while it recurses the crops in page order, not under a lock in `page-ocr`: which figures survive is then deterministic (the first ones in page order). It does not look at the wrapper's `max_entries`: the wrapper stops listing past its own cap.
+- **Options** live in `options["page-ocr"]` (`min_text_chars` included, not `figures.min_text_chars`); `max_pages` is `OCR_MAX_PAGES` as before.
+- **Tables** from a non-`full` answer are recorded in `figures.json` with `member: null`; a figure member (`page-NNNN/fig-N.png`) never goes through layout again.
+- **`documents` still OCRs an image** that media-decode did not take (text only, no layout) through `page_ocr.plain_image_text`; `media-markdown` is the only caller that makes page units of images.
+- **Not verified here** (open question 2, needs the target deployment): `docling-serve` image uploads, its OCR language option and the codes behind `lang_map`, table cell text on a scanned page. The conversion was tested against a hand-written `DoclingDocument`, not a live server; the `yolo-onnx` engine against a stub model, not real DocLayout-YOLO weights (output layouts `(1, N, 6)` and `(1, 4+nc, N)` are handled).

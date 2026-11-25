@@ -1,11 +1,11 @@
 """`media-markdown` (docs/implemented-plans/media-markdown.md): one time-ordered `parsed/<rel>.md` for an image, video or audio file that media-decode decoded,
 built from whichever of asr / caption / frame-ocr produced a result (their scratch copies in `ctx.work/<processor>/<rel>/`). It claims the file, so `documents` never sees
-media; an image's OCR (`ocr.maybe_ocr`) runs here."""
+media; an image's OCR (`page_ocr.image_markdown`: the image is page 1, its figures become members) runs here."""
 
 import json
 import os
 
-from cadmus_parser_server import ocr
+from cadmus_parser_server import ocr, page_ocr
 from cadmus_parser_server.asr import HANDLERS
 from cadmus_parser_server.parse import _ctype
 
@@ -36,7 +36,7 @@ def _load(ctx, proc: str, rel: str, name: str):
 
 
 class MediaMarkdown:
-    name, top_dirs, after, before = "media-markdown", ("parsed",), ("media-decode", "asr-split", "caption-split", "frame-ocr"), HANDLERS
+    name, top_dirs, after, before = "media-markdown", ("parsed", "figures"), ("media-decode", "asr-split", "caption-split", "frame-ocr"), HANDLERS
 
     def accepts(self, file) -> bool:
         return file.index_address is None
@@ -52,8 +52,10 @@ class MediaMarkdown:
         segs = (_load(ctx, "asr-split", file.rel, "transcript.json") or {}).get("segments") or []
         text = ""
         if kind == "image":
-            with open(file.path, "rb") as f:
-                text = ocr.maybe_ocr(f.read(), file.rel, _ctype(file, ctx), "", sink.note)
+            try:
+                text = page_ocr.image_markdown(file, ctx, sink)
+            except Exception as e:  # noqa: BLE001  OCR never fails the parse
+                sink.note(f"{file.rel}: ocr failed ({type(e).__name__}: {e})")
         md = build_markdown(kind, caps, ents, segs, text)
         if not md.strip():
             return

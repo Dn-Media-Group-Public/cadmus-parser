@@ -54,6 +54,6 @@ def test_processor(tmp_path):
 
 
 def test_image_with_caption(tmp_path, monkeypatch):
-    monkeypatch.setattr(mm.ocr, "maybe_ocr", lambda *a: "Hello")
+    monkeypatch.setattr(mm.page_ocr, "image_markdown", lambda *a: "Hello")
     s = run(tmp_path, "a.png", {"kind": "image"}, [("caption-split", "captions.json", {"captions": CAP[:1]})])
     assert s.files["parsed/a.png.md"] == b"_SCENE_: A room.\n\n_ON SCREEN_: Hello"

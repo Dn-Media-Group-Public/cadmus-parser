@@ -11,3 +11,4 @@
 - [parse-bytes-per-processor](parse-bytes-per-processor.md) — `MAX_PARSE_BYTES_{FILES,IMAGE,VIDEO,SOUND}`, `MAX_PARSE_BYTES` as fallback; media over its cap is not decoded
 - [image-text-only-ocr](image-text-only-ocr.md) — images get `parsed/*.md` only when OCR finds text (no EXIF fallback)
 - [media-markdown](media-markdown.md) — `media-markdown` processor: one time-interleaved `parsed/*.md` for images, video and audio
+- [figure-extraction](figure-extraction.md) — `layout` feature (chains of profiles), `layout-sidecar` (yolo-onnx, docling-serve, openai-vlm), `page-ocr` and page units; figures of scanned pages as image members, `figures.json`, full-page Docling profiles, per-job OCR languages

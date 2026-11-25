@@ -61,7 +61,7 @@ def test_end_to_end_text_appears_and_disappears(monkeypatch):
     json.dump({"kind": "video", "frame_passes": [{"file": "frames/full-1.mkv", "codec": "mjpeg"}]}, open(f"{dec}/decode.json", "w"))
     monkeypatch.setenv("OCR_URL", "http://x")
     monkeypatch.setenv("OCR_TOKEN", "t")
-    monkeypatch.setattr(fo, "_engine", lambda img: (("SIGN", 80.0, "tesseract") if sum(img.tobytes()) / (64 * 48) > 128 else ("", 0.0, "tesseract")))
+    monkeypatch.setattr(fo, "_engine", lambda img, langs=None: (("SIGN", 80.0, "tesseract") if sum(img.tobytes()) / (64 * 48) > 128 else ("", 0.0, "tesseract")))
     s = MemSink()
     worker.Runner(s, processors.order([fo.FrameOcr()]), {}, ["ocr"], work).run_tree(tree)
     out = json.loads(s.files["frame-ocr/original/ocr.json"])

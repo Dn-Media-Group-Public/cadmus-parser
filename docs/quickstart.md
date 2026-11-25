@@ -94,6 +94,8 @@ docker stack deploy -c docker-compose.yml -c lib/cadmus-parser/docker-compose.pa
 docker service logs -f mystack_app
 ```
 
+Optional model features need their sidecar and a profile table: `--layout` in the overlay and `PARSE_LAYOUT_TABLE` for [figure extraction](reference.md#figure-extraction); OCR languages are selected per job and defaulted per deployment: [OCR languages](parser-image.md#ocr-languages).
+
 `PARSE_BLOB_OPTIONS` (JSON fsspec options such as `{"endpoint_url": "..."}`, never secrets) is only needed for a non-AWS store.
 
 **A store inside your own stack** (SeaweedFS with IAM enabled, say): the egress proxy blocks private addresses, so name the one exception in your stack file, next to a network the proxy shares with the store:

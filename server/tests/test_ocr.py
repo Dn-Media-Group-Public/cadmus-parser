@@ -24,8 +24,19 @@ def fake_tess(monkeypatch, words, conf):
     monkeypatch.setattr(pt, "image_to_data", lambda *a, **k: d)
 
 
+class Ctx:
+    def options_of(self, name):
+        return {}
+
+
+class Notes:
+    def __init__(self, notes):
+        self.note = notes.append
+
+
 def run(notes):
-    return ocr.maybe_ocr(png(), "a.png", "image/png", "EXIF", notes.append)
+    from cadmus_parser_server import page_ocr
+    return page_ocr.plain_image_text(png(), "a.png", Ctx(), Notes(notes))
 
 
 def test_confident_tesseract_wins(monkeypatch):
@@ -46,7 +57,7 @@ def test_weak_result_goes_remote_and_wins(monkeypatch):
     fake_tess(monkeypatch, ["x"], 38)
     monkeypatch.setenv("OCR_URL", "http://s")
     monkeypatch.setenv("OCR_TOKEN", "t")
-    monkeypatch.setattr(ocr, "remote_ocr", lambda img, ct="image/png": "remote text")
+    monkeypatch.setattr(ocr, "remote_ocr", lambda img, ct="image/png", tags=None: "remote text")
     n = []
     assert run(n) == "remote text" and n == ["a.png: ocr remote"]
 
@@ -68,27 +79,6 @@ def test_oversize_image_noted_not_failed(monkeypatch):
     monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", 1000)
     n = []
     assert run(n) == "" and "too large" in n[0]
-
-
-def test_pdf_only_scanned_page_is_ocrd(monkeypatch):
-    pdfium = pytest.importorskip("pypdfium2")
-    pdf = pdfium.PdfDocument.new()
-    for _ in range(2):
-        pdf.new_page(100, 100)
-    b = io.BytesIO()
-    pdf.save(b)
-    texts = iter(["A text layer long enough to count.", ""])
-    monkeypatch.setattr(pdfium.PdfTextPage, "get_text_range", lambda self, *a, **k: next(texts))
-    monkeypatch.setattr(ocr, "ocr_image", lambda img: ("scanned words", "tesseract (conf 90)"))
-    n = []
-    out = ocr.maybe_ocr(b.getvalue(), "d.pdf", "application/pdf", "md", n.append)
-    assert out.index("<!-- page 1 -->") < out.index("<!-- page 2 (ocr) -->") and out.endswith("scanned words")
-    assert n == ["d.pdf: page 2 ocr tesseract (conf 90)"]
-    monkeypatch.setattr(ocr, "MAX_PAGES", 0)
-    texts = iter(["", ""])
-    n = []
-    ocr.maybe_ocr(b.getvalue(), "d.pdf", "application/pdf", "md", n.append)
-    assert n == ["d.pdf: ocr stopped at page 0"]
 
 
 @pytest.mark.skipif(not os.path.isdir(os.path.join(os.path.dirname(__file__), "..", "..", "ocr-sidecar")), reason="ocr-sidecar/ not next to server/")
@@ -145,9 +135,9 @@ def documents(monkeypatch, tmp_path, words):
     f.write_bytes(png())
     monkeypatch.setattr(parse, "_ctype", lambda file, ctx: "image/png")
     monkeypatch.setattr(extract, "file_to_markdown", lambda *a: pytest.fail("markitdown must not run for images"))
-    monkeypatch.setattr(ocr, "ocr_image", lambda img: (words, "fake"))
+    monkeypatch.setattr(ocr, "ocr_engine", lambda img, langs=None: (words, None, "fake", "fake"))
     s = Sink()
-    parse.Documents().process(s, NS(path=str(f), rel="a.png", size=1), None)
+    parse.Documents().process(s, NS(path=str(f), rel="a.png", size=1), Ctx())
     return s
 
 

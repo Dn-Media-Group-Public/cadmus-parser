@@ -139,3 +139,11 @@ def test_oauth2_profile_fetches_a_token_and_a_token_failure_is_a_502():
     assert egress_rules.endpoints(prof, lambda h: {"llm.example": "1.1.1.1", "idp.example": "2.2.2.2"}[h]) == [("1.1.1.1", 443), ("2.2.2.2", 443)]
     with __import__("pytest").raises(ValueError):
         sidecar.make_app({"o": {**prof["o"], "client_secret": ""}})
+
+
+def test_language_header_is_a_prompt_hint():
+    c, seen = client()
+    c.post("/process", content=PNG, headers={"Authorization": "Bearer tr", "Content-Type": "image/png", "X-Language": "nb, en"})
+    assert "The text is in: nb, en." in json.loads(seen[0].content)["messages"][0]["content"][0]["text"]
+    c.post("/process", content=PNG, headers={"Authorization": "Bearer tr", "Content-Type": "image/png"})
+    assert "The text is in" not in json.loads(seen[1].content)["messages"][0]["content"][0]["text"]

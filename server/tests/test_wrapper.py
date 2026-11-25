@@ -538,3 +538,33 @@ def test_two_features_on_one_sidecar_have_separate_usage_records(service, monkey
     j.post(features={"asr": "p1", "asr-fallback": "p2"})
     st = j.wait()
     assert st["usage"] == {"calls": [{"t": 0, "profile": "p1"}, {"t": 1, "profile": "p2"}], "truncated": False} and not records
+
+
+def test_layout_chain_default_allowed_and_one_usage_record_per_profile(service, monkeypatch):
+    records = {}
+
+    def fake(p, method, path, body=None):
+        if method == "POST":
+            records[body["job"]] = [{"profile": body["profile"]}]
+            return {"token": "job-" + body["profile"]}
+        return {"calls": records.pop(path.split("/")[3]), "truncated": False}
+    monkeypatch.setattr(wrapper, "sidecar_call", fake)
+    side = {"url": "http://layout", "token": "t", "admin_token": "adm"}
+    prof = {"layout": {"cheap": side, "docling": {**side, "token": "t2"}, "gemini": {**side, "token": "t3"}}}
+    s = service(profiles=prof, layout_default=["cheap", "docling"], layout_allowed=["cheap", "docling"],
+                parser_cmd=hostile("os.write(1, json.dumps({'note': os.environ['LAYOUT_CHAIN']}).encode() + b'\\n')"))
+    j = s.job({"a.md": b"# a"})
+    assert j.post(features={"layout": ["cheap", "gemini"]}).status_code == 400  # not allowed
+    assert j.post(features={"layout": ["nope"]}).status_code == 400
+    assert j.post(features={"layout": 3}).status_code == 400
+    assert j.post(features={"layout": []}).status_code == 202  # the operator's default chain
+    st = j.wait()
+    chain = json.loads(j.index()["notes"])
+    assert chain == [{"name": "cheap", "url": "http://layout", "token": "job-cheap"}, {"name": "docling", "url": "http://layout", "token": "job-docling"}]
+    assert [c["profile"] for c in st["usage"]["calls"]] == ["cheap", "docling"] and not records
+    j = s.job({"a.md": b"# a"})
+    assert j.post(features={"layout": "docling"}).status_code == 202  # a plain string is a chain of one
+    j.wait()
+    assert json.loads(j.index()["notes"]) == [{"name": "docling", "url": "http://layout", "token": "job-docling"}]
+    s2 = service(profiles=prof, parser_cmd=hostile("pass"))  # no default configured: `layout` without profiles is refused
+    assert s2.job({"a.md": b"# a"}).post(features={"layout": []}).status_code == 400

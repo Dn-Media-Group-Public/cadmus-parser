@@ -22,6 +22,8 @@ def test_overlay_per_client_networks_env_and_optional_parts():
     assert asr["networks"] == ["parse-asr", "public"] and "ASR_PROFILES" in asr["environment"] and "ocr-sidecar" not in overlay.overlay(["w"], asr=True)["services"]
     cap = overlay.overlay(["w"], caption=True)["services"]["caption-sidecar"]
     assert cap["networks"] == ["parse-caption", "public"] and "CAPTION_PROFILES" in cap["environment"]
+    lay = overlay.overlay(["w"], layout=True)["services"]["layout-sidecar"]
+    assert lay["networks"] == ["parse-layout", "public"] and "LAYOUT_PROFILES" in lay["environment"]
     assert overlay.overlay(["w"], network_names={"w": "mine"})["services"]["w"]["networks"] == ["mine"]
     plain = overlay.overlay(["w"])
     assert set(plain["services"]) == {"parser", "w"} and "image" not in plain["services"]["parser"]

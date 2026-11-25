@@ -3,7 +3,7 @@
 # nothing; `blob-sidecar` = the authenticated egress proxy the wrapper reaches the store through (the parser has no route out: its networks are
 # internal). Deploy with `docker stack deploy -c docker-compose.parse.yml -c <overlay> ...`; `python -m cadmus_parser_server.overlay` writes
 # the overlay: a `<client>-parse` network per client service (the client and the parser on it), PARSE_URL/PARSE_TOKEN in each client,
-# the dev store's network for the proxy, your image for `parser` and the `ocr-sidecar` / `asr-sidecar` / `caption-sidecar` when configured.
+# the dev store's network for the proxy, your image for `parser` and the `ocr-sidecar` / `asr-sidecar` / `caption-sidecar` / `layout-sidecar` when configured.
 version: "3.8"
 
 services:
@@ -28,6 +28,9 @@ services:
       ASR_FALLBACK_PROFILES: ${PARSE_ASR_FALLBACK_TABLE:-}
       CAPTION_PROFILES: ${PARSE_CAPTION_TABLE:-}    # same for `features.caption`, and for the fallback model `features.caption-fallback`
       CAPTION_FALLBACK_PROFILES: ${PARSE_CAPTION_FALLBACK_TABLE:-}
+      LAYOUT_PROFILES: ${PARSE_LAYOUT_TABLE:-}      # name -> {url, token} for `features.layout`: a job names an ordered chain of these (figure extraction)
+      LAYOUT_DEFAULT_CHAIN: ${LAYOUT_DEFAULT_CHAIN:-}   # profile names used when a job asks for `layout` without naming any
+      LAYOUT_ALLOWED: ${LAYOUT_ALLOWED:-}               # the profiles a job may name (unset = all); one name here = a forced profile
       PARSE_POOL_SIZE: ${PARSE_POOL_SIZE:-4}
       PARSE_LIMITS: ${PARSE_LIMITS:-}               # per media class, see docs/reference.md; every built-in default is finite
       PARSE_PASS_ENV: ${PARSE_PASS_ENV:-}             # names of further variables the parser process is to see (processor settings, no secrets)
@@ -46,8 +49,11 @@ services:
       OCR_TIMEOUT: ${OCR_TIMEOUT:-}
       ASR_TIMEOUT: ${ASR_TIMEOUT:-}
       CAPTION_TIMEOUT: ${CAPTION_TIMEOUT:-}
+      LAYOUT_TIMEOUT: ${LAYOUT_TIMEOUT:-}
+      OCR_LANGS: ${OCR_LANGS:-}                 # the Tesseract packs installed in the image (a build-time choice: docs/parser-image.md)
+      OCR_DEFAULT_LANGS: ${OCR_DEFAULT_LANGS:-}   # BCP 47 tags a job gets when it selects none
       REPLICA_ID: "{{.Task.Slot}}"
-    networks: [parse-egress, parse-ocr, parse-asr, parse-caption]
+    networks: [parse-egress, parse-ocr, parse-asr, parse-caption, parse-layout]
 
   blob-sidecar:
     image: ${IMAGE_PREFIX:-}cadmus-parser-blob-sidecar:${IMAGE_TAG:-local}   # blob-sidecar/Dockerfile (context: this repo's root): squid 6, own egress rules
@@ -65,3 +71,4 @@ networks:
   parse-ocr: { driver: overlay, internal: true }      # parser <-> ocr-sidecar
   parse-asr: { driver: overlay, internal: true }      # parser <-> asr-sidecar
   parse-caption: { driver: overlay, internal: true }  # parser <-> caption-sidecar
+  parse-layout: { driver: overlay, internal: true }   # parser <-> layout-sidecar

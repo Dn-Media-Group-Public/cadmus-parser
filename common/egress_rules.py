@@ -56,6 +56,8 @@ def endpoints(profiles: dict, resolve) -> list[tuple[str, int]]:
     """(ip, port) of every profile's base_url, plus the `token_url` of `oauth2` profiles and the metadata server for `google` profiles; `resolve(host) -> ip`."""
     out = []
     for p in profiles.values():
+        if not p.get("base_url"):
+            continue  # an engine that runs in the sidecar (layout `yolo-onnx`) calls nobody
         u = urlparse(p["base_url"])
         out.append((resolve(u.hostname), u.port or (443 if u.scheme == "https" else 80)))
         if p.get("auth") == "oauth2":  # the token host too
