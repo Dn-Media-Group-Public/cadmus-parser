@@ -3,7 +3,7 @@
 Turn the files you did not write into Markdown, JSON and metadata, **without trusting the code that reads them**. Documents, web pages, images, archives, audio and
 video go in; text, outlines and structured data come out, as artefacts in your own object store.
 
-## What it can parse (the default `files` processors)
+## What it can parse
 
 - **Everything to Markdown** with [markitdown](https://github.com/microsoft/markitdown): Word, Excel, PowerPoint, PDF, EPUB, CSV, JSON, XML, plain text ...
 - **Web pages**: HTML to Markdown with main-content extraction ([trafilatura](https://trafilatura.readthedocs.io/)), links made absolute from a base URL, plus a simplified main-content view
@@ -19,8 +19,7 @@ video go in; text, outlines and structured data come out, as artefacts in your o
 - **File type detection** from content (libmagic), refined by file name only where the bytes are generic
 - **Your own formats**: add a processor package; processors are ordered, run per file and can recurse into archives ([how](docs/processors.md))
 
-Also: a per-input `index.json` that says what came out of each file and archive member; any fsspec store; horizontally scalable (each replica has its own uid pool); one instance per
-consuming stack.
+[Example output trees](docs/output-examples.md) for supported formats.
 
 ## Remote models
 
