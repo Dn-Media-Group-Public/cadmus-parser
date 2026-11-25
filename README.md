@@ -13,6 +13,7 @@ video go in; text, outlines and structured data come out, as artefacts in your o
 - **Binary structured formats** (msgpack, CBOR, BSON, plist, protobuf, gRPC-web) become JSON
 - **Media decode**: image, video and audio decoded once into a thumbnail, scene-change keyframes, a 16 kHz `audio.opus`, a browser-playable rendition (when the original does not play) and a downscaled frame store for later per-frame analysis ([options](docs/processors.md#media-decode))
 - **File metadata** as YAML: EXIF/GPS, Office tracked changes and comments, GeoTIFF/GDAL and vector (GPX, KML, GeoJSON, GeoPackage, shapefile) CRS and bounds, audio/video streams and chapters, PDF edit history
+- **Example output trees** for every input kind: [output examples](docs/output-examples.md)
 - **Your own formats**: add a processor package; processors are ordered, run per file and can recurse into archives ([how](docs/processors.md))
 
 Other client-facing capabilities: per-media-class limits (deadline, memory, file and tree sizes) set by the operator only; a per-input `index.json` that says what came out of
@@ -70,6 +71,7 @@ The adversary is **the file, and so the parser** that reads it. The client (your
 
 - [Quickstart](docs/quickstart.md): a minimal client stack and a toy processor, end to end
 - [Reference](docs/reference.md): wrapper HTTP API, `index.json`, processor entry point, stack file, environment variables, `PARSE_LIMITS`
+- [Example output trees](docs/output-examples.md)
 - [How to write a processor](docs/processors.md) · [How to build a client image](docs/client-image.md) · [the parser image](docs/parser-image.md) · [How to write a sidecar](docs/sidecar-protocol.md)
 - [Client and credential minting](docs/client.md)
 - [Security guide](docs/security.md) · [Versioning and upgrades](docs/versioning.md)

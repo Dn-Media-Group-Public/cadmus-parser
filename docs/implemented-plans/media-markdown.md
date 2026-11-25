@@ -6,16 +6,15 @@ ASR (`asr/<rel>/transcript.json`), captions (`caption/<rel>/captions.json`) and 
 
 ## Design (decided)
 
-- **New processor `media-markdown`** (new module `server/cadmus_parser_server/media_markdown.py`, entry point in `server/pyproject.toml`). `after = ("media-decode", "asr-split", "caption-split", "frame-ocr")`, `before = HANDLERS` (from `asr.py`), `top_dirs = ("parsed", "terse")`. It owns media: for a file media-decode decoded (`decode.json` kind `image` / `video` / `audio`) it writes `parsed/<rel>.md` (+ `terse/` via `parse._terse`) and **claims the file**, so `documents` never sees it. No `decode.json` (not media) -> return without claiming.
+- **New processor `media-markdown`** (new module `server/cadmus_parser_server/media_markdown.py`, entry point in `server/pyproject.toml`). `after = ("media-decode", "asr-split", "caption-split", "frame-ocr")`, `before = HANDLERS` (from `asr.py`), `top_dirs = ("parsed", "terse")`. It owns media: for a file media-decode decoded (`decode.json` kind `image` / `video` / `audio`) it writes `parsed/<rel>.md` (+ ) and **claims the file**, so `documents` never sees it. No `decode.json` (not media) -> return without claiming.
 - **Image OCR moves into it.** For `kind == image` it calls `ocr.maybe_ocr` exactly as `documents` does today (Tesseract, remote OCR when the job asked for `ocr`), so image OCR behaviour is unchanged; `documents` keeps handling everything that is not media.
 - **Inputs are scratch copies.** `asr-split`, `caption-split` and `frame-ocr` keep writing their JSON outputs **at their current paths** (no move), and additionally write the same JSON into their own `ctx.dir()`. `media-markdown` reads those from `ctx.work/<processor>/<rel>/`. A feature that did not run, raised, or produced nothing leaves no scratch file; its parts are simply omitted. The markdown is written if **any** part exists; if none do (and it is not an image with OCR text), no `parsed/` file is written and the file is still claimed.
-- **Layout, time-interleaved, text only (no keyframe image links).** Sections by time window; each holds, when present: `**Scene:**` (caption), `**On screen:**` (frame OCR), `**Speech:**` (ASR segments). Window boundaries = caption windows when captions exist, else fixed windows (default 30 s, option `window_seconds`). Entries are assigned by start time; an OCR entry spanning windows appears in the first. Image: caption then OCR text. Audio: speech only. Skipped/blocked caption units and failed chunks produce no text (their outcomes stay in the JSON).
-- Options: `options["media-markdown"]`: `window_seconds` (30).
+- **Layout (revised after the first real run): a flat, time-ordered list of paragraphs, no headings, text only.** Speech `` `0:06` **Speaker:** text ``, caption `` `0:08` _SCENE:_ text ``, frame OCR `` `0:05` _ON SCREEN:_ text ``; ties: scene, on screen, speech. Image: caption, then OCR text, no times. Skipped/blocked caption units and failed chunks produce no text. No `terse/` output (it keeps only headings and links). No options.
 - Keyframes, `media/<rel>/…`, and the three JSON outputs are unchanged.
 
 ## Implementation order
 
-1. Pure helpers in `media_markdown.py`: `build_markdown(kind, captions, ocr_entries, segments, window_seconds, image_text)`, tested on synthetic data.
+1. Pure helpers in `media_markdown.py`: `build_markdown(kind, captions, ocr_entries, segments, image_text)`, tested on synthetic data.
 2. `asr.py`, `caption.py`, `frame_ocr.py`: also write their result JSON to `ctx.dir()`.
 3. `MediaMarkdown` processor: read decode.json + scratch files, image OCR via `ocr.maybe_ocr`, `put_bytes` + `_terse`, claim.
 4. Register entry point; check ordering (`processors.order`) has no cycle with `documents` and the handler list.

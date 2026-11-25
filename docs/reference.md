@@ -41,7 +41,7 @@ when its current credential expires.
 
 ## `status.json` and `index.json`
 
-Written under the output base; `index.json` first, then `status.json`. Never listed inside the index.
+Written under the output base; `index.json` first, then `status.json`. Never listed inside the index. Example output trees per input kind: [output examples](output-examples.md).
 
 ```json
 {"status": "running" | "done" | "failed", "owner_replica": "...", "updated": 1700000000.0, "error"?: "...", "traceback"?: "...", "usage"?: {"calls": [...], "truncated": false, "error"?: "..."}}
@@ -240,5 +240,5 @@ See also: [Plan: Caption](implemented-plans/05-caption.md)
 
 ## media-markdown
 
-For an image, video or audio file decoded by `media-decode`, `media-markdown` writes one time-interleaved `parsed/<rel>.md` (+ `terse/<rel>.md`) from whichever of `asr`, `caption` and `frame-ocr` produced a result. Sections are `## h:mm:ss` windows (the caption windows when captions exist, else fixed windows; option `options["media-markdown"]`: `window_seconds`, default 30), each with `**Scene:**` (caption), `**On screen:**` (frame OCR) and `**Speech:**` (ASR). An image gets its caption, then its OCR text. Nothing is written when no part exists; the file is still claimed, so `documents` never sees media. The three JSON outputs are unchanged.
+For an image, video or audio file decoded by `media-decode`, `media-markdown` writes `parsed/<rel>.md` (no `terse/`: it would hold nothing useful) from whichever of `asr`, `caption` and `frame-ocr` produced a result: one paragraph per item, in time order, no headings. A speech segment is `` `0:06` **B:** text `` (no name when the ASR gave none), a caption `` `0:08` _SCENE:_ text ``, a frame-OCR entry `` `0:05` _ON SCREEN:_ text `` (multi-line OCR text joined with ` / `). An image has no times: its caption, then its OCR text. Captions that were skipped or blocked leave no line. Nothing is written when no part exists; the file is still claimed, so `documents` never sees media. The three JSON outputs are unchanged.
 See also: [Plan: media-markdown](implemented-plans/media-markdown.md)
