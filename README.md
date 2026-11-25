@@ -9,6 +9,7 @@ video go in; text, outlines and structured data come out, as artefacts in your o
 - **Web pages**: HTML to Markdown with main-content extraction ([trafilatura](https://trafilatura.readthedocs.io/)), links made absolute from a base URL, plus a simplified main-content view
 - **Terse outline view** of every parsed document (headings, links, images) for cheap skimming
 - **OCR**: images and scanned PDF pages, Tesseract first, a remote multimodal model as the fallback for poor results; also the frames of a video (`frame-ocr`)
+- **Figure extraction**: the pictures on scanned pages are detected (a cheap local model, Docling, or a vision model, as an ordered chain with escalation), cropped and kept as image members with their page position in `figures.json`; a full-page Docling profile also gives reading-order Markdown with tables ([figure extraction](docs/reference.md#figure-extraction)). OCR languages are selected per job ([OCR languages](docs/parser-image.md#ocr-languages))
 - **Speech to text (ASR)**: the audio of audio and video files, transcribed in chunks and merged into one transcript, primary model with a fallback profile ([ASR](docs/reference.md#asr))
 - **Captioning**: a description of each image and of windows of keyframes from a video, by a remote vision model with a fallback profile ([caption](docs/reference.md#caption))
 - **Archives** (zip, tar, tgz, 7z, rar, gz/bz2/xz) are unpacked and every member parsed
@@ -23,13 +24,13 @@ video go in; text, outlines and structured data come out, as artefacts in your o
 
 ## Remote models
 
-OCR fallback, ASR and captioning call remote models, always through a sidecar.
+OCR fallback, ASR, captioning and figure extraction (`docling-serve`, vision-model profiles) call remote models, always through a sidecar.
 
 A **profile** is a named, operator-configured way of reaching one model: the endpoint, the model, how to authenticate, and a prompt, all kept in the sidecar. A job asks for a
 profile by name and never sees or sets the details. Examples: `lan` (a self-hosted OCR server on the local network), a Whisper-style `transcriptions` endpoint for ASR, a
 `chat` model with audio input as the ASR fallback, or a hosted vision model for captions.
 
-- **You choose the profile per job.** `features` in the job (`{"asr": "<profile>", "asr-fallback": "<profile>", "caption": "<profile>", "ocr": "<profile>"}`) names which
+- **You choose the profile per job.** `features` in the job (`{"asr": "<profile>", "asr-fallback": "<profile>", "caption": "<profile>", "ocr": "<profile>", "layout": ["<profile>", ...]}`) names which
   model profile each feature uses, and a fallback can be a different one; the parser gets only the profile its job asked for. Profiles (endpoint, model, auth, prompt) are
   defined by the operator in the sidecar, so a client can pick among them but not invent one. ([reference](docs/reference.md#asr), [sidecar protocol](docs/sidecar-protocol.md))
 - **Usage is logged by the sidecar, not the parser.** One record per upstream call (feature, profile, model, outcome, tokens or audio seconds) ends up in the job's
@@ -85,6 +86,7 @@ The adversary is **the file, and so the parser** that reads it. The client (your
 | `blob-sidecar/` | the authenticated egress proxy (squid) the wrapper reaches the store through; public internet only |
 | `caption-sidecar/` | one image or window of keyframes to one upstream vision-model call, JSON answer; the processors in `server/` window, validate and fall back ([caption](docs/reference.md#caption)) |
 | `asr-sidecar/` | one audio chunk to one upstream ASR call (`transcriptions` or `chat` backend), JSON answer; the processors in `server/` chunk, validate, fall back and merge ([ASR](docs/reference.md#asr)) |
+| `layout-sidecar/` | one page image to the regions on it (`yolo-onnx` on CPU, `docling-serve` or an OpenAI-compatible vision model), one common box answer; the `page-ocr` processor in `server/` chains profiles, escalates and crops ([figure extraction](docs/reference.md#figure-extraction)) |
 | `ocr-sidecar/` | a forwarder to OpenAI-compatible OCR endpoints, one token per profile; the model for [your own sidecar](docs/sidecar-protocol.md) |
 | `docker-compose.parse.yml` | the swarm stack file: `parser`, `blob-sidecar`, networks and capabilities |
 | `server/install.sh`, `server/Dockerfile` | what the **parser image** (wrapper plus processors) runs after `ADD lib/cadmus-parser /cadmus` (see [the parser image](docs/parser-image.md)); the Dockerfile is a ready-made one with the default processors |
@@ -100,7 +102,7 @@ The adversary is **the file, and so the parser** that reads it. The client (your
 
 ## Tests
 
-`pip install "./server[s3,files,test]" "./client[test]" pytest-asyncio httpx` then, one process per area: `python -m pytest server`, `client`, `blob-sidecar`, `ocr-sidecar`, `asr-sidecar`, `caption-sidecar`.
+`pip install "./server[s3,files,test]" "./client[test]" pytest-asyncio httpx` then, one process per area: `python -m pytest server`, `client`, `blob-sidecar`, `ocr-sidecar`, `layout-sidecar`, `asr-sidecar`, `caption-sidecar`.
 The tests use `file://` stores; nothing needs a running object store.
 
 MIT licence.

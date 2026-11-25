@@ -10,7 +10,7 @@ A file over its size cap (`MAX_PARSE_BYTES_*`) gets only that.
 
 ## Documents: Word, Excel, PowerPoint, PDF, EPUB, CSV, JSON, XML, plain text, ...
 
-markitdown; a scanned PDF page with no text layer goes through OCR (`ocr` feature).
+markitdown; a scanned PDF page with no text layer goes through OCR (`ocr` feature). With the `layout` feature the pictures on scanned pages are also cropped out as members (see below).
 
 <pre>
 report.pdf  -&gt;
@@ -18,6 +18,31 @@ metadata/report.pdf.yaml
 <b>parsed/report.pdf.md</b>
 terse/report.pdf.md           headings, links, images only (not written when empty)
 </pre>
+
+A **scanned PDF with `layout`** (`features: {"layout": ["cheap", "docling"]}`): each picture found on a scanned page is a member of the PDF, in page order, named by page; no page image is
+ever an output. Each crop goes through the image chain (thumbnail, metadata, `caption` if asked, OCR). Nothing changes without `layout`.
+
+<pre>
+scan.pdf  -&gt;
+metadata/scan.pdf.yaml
+<b>parsed/scan.pdf.md</b>                      <!-- page N (ocr) --> sections; a `full` Docling profile gives reading-order Markdown with tables and ![](page-0003/fig-1.png) links
+terse/scan.pdf.md
+figures/scan.pdf/figures.json           (if any picture was found)
+original/scan.pdf.d/page-0003/fig-1.png
+media/scan.pdf.d/page-0003/fig-1.png/thumb.jpg    and the rest of the image chain, for each crop
+metadata/scan.pdf.d/page-0003/fig-1.png.yaml
+parsed/scan.pdf.d/page-0003/fig-1.png.md          (if the crop has OCR text or a caption)
+original/scan.pdf.d/page-0003/table-1.md          (only from a `full` profile)
+</pre>
+
+`figures/scan.pdf/figures.json`: where on the page each one was, and which profile found it (`bbox` in pixels of the full-resolution page; `member` is null for a table that was
+recorded but not extracted):
+
+```json
+[{"page": 3, "label": "picture", "member": "page-0003/fig-1.png", "bbox": [120, 340, 980, 1100], "page_size": [1654, 2339], "score": 0.93, "profile": "cheap", "engine": "yolo-onnx"}]
+```
+
+The notes name the profile that answered and any escalation: `scan.pdf: page 3: layout docling (escalated from cheap)`.
 
 ## Markdown (`.md`, `.markdown`)
 
@@ -90,6 +115,8 @@ media/photo.heic/decode.json
 media/photo.heic/renditions.json
 caption/photo.heic/captions.json    (if the caption feature)
 <b>parsed/photo.heic.md</b>          (if there is a caption or OCR text)
+figures/photo.heic/figures.json     (if the layout feature found pictures on a page of text, e.g. a scanned page)
+original/photo.heic.d/page-0001/fig-1.png   and its own thumbnail, metadata, caption (the image is page 1)
 </pre>
 
 `parsed/photo.heic.md`: the caption (`_SCENE_`), then the OCR text (`_ON SCREEN_`), no timestamps:
